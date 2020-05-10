@@ -7,7 +7,7 @@ use suffine::IndexBuilder;
 
 const OFFSET: usize = 50;
 const TOP_K_ARTICLES: usize = 10;
-const FIRST_N_OCCURENCES: usize = 3;
+const FIRST_N_OCCURRENCES: usize = 3;
 
 #[derive(Serialize, Deserialize)]
 struct Article {
@@ -47,13 +47,13 @@ fn main() {
 
             let doc_text = index.document(doc_id).unwrap();
 
-            for pos in positions.iter().take(FIRST_N_OCCURENCES) {
+            for pos in positions.iter().take(FIRST_N_OCCURRENCES) {
                 let mut begin = pos.saturating_sub(OFFSET);
                 while !doc_text.is_char_boundary(begin) {
                     begin -= 1;
                 }
 
-                let mut end = (pos + &query.len())
+                let mut end = (pos + query.len())
                     .saturating_add(OFFSET)
                     .min(doc_text.len());
                 while !doc_text.is_char_boundary(end) {
@@ -65,7 +65,7 @@ fn main() {
                     if begin > 0 { "..." } else { "" },
                     &doc_text[begin..*pos].replace("\n", ""),
                     Style::new().bold().fg(Colour::Green).paint(&query),
-                    &doc_text[pos + &query.len()..end].replace("\n", ""),
+                    &doc_text[pos + query.len()..end].replace("\n", ""),
                     if end < doc_text.len() { "..." } else { "" }
                 );
             }
