@@ -1,7 +1,7 @@
 use suffix::SuffixTable;
 
 pub struct Index {
-    doc_offsets: Vec<usize>,
+    doc_offsets: Vec<u32>,
     suffix_table: SuffixTable<'static, 'static>,
 }
 
@@ -11,24 +11,23 @@ impl Index {
             .positions(&query)
             .iter()
             .map(|p| {
-                let p = *p as usize;
-                let doc_id = match self.doc_offsets.binary_search(&p) {
+                let doc_id = match self.doc_offsets.binary_search(p) {
                     Ok(x) => x,
                     Err(x) => x - 1,
                 };
                 let pos_in_doc = p - self.doc_offsets[doc_id];
-                (doc_id, pos_in_doc)
+                (doc_id as usize, pos_in_doc as usize)
             })
             .collect()
     }
 
     pub fn document(&self, doc_id: usize) -> Option<&str> {
         if doc_id < self.doc_offsets.len() {
-            let begin = self.doc_offsets[doc_id];
+            let begin = self.doc_offsets[doc_id] as usize;
             let end = if doc_id == self.doc_offsets.len() - 1 {
                 self.suffix_table.text().len() - 1
             } else {
-                self.doc_offsets[doc_id + 1] - 1
+                (self.doc_offsets[doc_id + 1] - 1) as usize
             };
             Some(&self.suffix_table.text()[begin..end])
         } else {
@@ -39,7 +38,7 @@ impl Index {
 
 pub struct IndexBuilder {
     concatenated_str: String,
-    doc_offsets: Vec<usize>,
+    doc_offsets: Vec<u32>,
 }
 
 impl IndexBuilder {
@@ -48,7 +47,7 @@ impl IndexBuilder {
     }
 
     pub fn add(&mut self, text: &str) -> &mut Self {
-        self.doc_offsets.push(self.concatenated_str.len());
+        self.doc_offsets.push(self.concatenated_str.len() as u32);
 
         self.concatenated_str.push_str(&text);
         self.concatenated_str.push('\0');
