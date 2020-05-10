@@ -1,14 +1,13 @@
 use suffix::SuffixTable;
 
 pub struct Index {
-    concatenated_str: String,
     doc_offsets: Vec<usize>,
-    st: SuffixTable<'static, 'static>,
+    suffix_table: SuffixTable<'static, 'static>,
 }
 
 impl Index {
     pub fn search(&self, query: &str) -> Vec<(usize, usize)> {
-        self.st
+        self.suffix_table
             .positions(&query)
             .iter()
             .map(|p| {
@@ -20,18 +19,18 @@ impl Index {
                 let pos_in_doc = p - self.doc_offsets[doc_id];
                 (doc_id, pos_in_doc)
             })
-            .collect::<Vec<(_, _)>>()
+            .collect()
     }
 
     pub fn document(&self, doc_id: usize) -> Option<&str> {
         if doc_id < self.doc_offsets.len() {
             let begin = self.doc_offsets[doc_id];
             let end = if doc_id == self.doc_offsets.len() - 1 {
-                self.concatenated_str.len() - 1
+                self.suffix_table.text().len() - 1
             } else {
                 self.doc_offsets[doc_id + 1] - 1
             };
-            Some(&self.concatenated_str[begin..end])
+            Some(&self.suffix_table.text()[begin..end])
         } else {
             None
         }
@@ -58,11 +57,9 @@ impl IndexBuilder {
     }
 
     pub fn build(self) -> Index {
-        let st = SuffixTable::new(self.concatenated_str.clone());
         Index {
-            concatenated_str: self.concatenated_str,
             doc_offsets: self.doc_offsets,
-            st,
+            suffix_table: SuffixTable::new(self.concatenated_str),
         }
     }
 }
