@@ -1,7 +1,42 @@
+use serde::{Deserialize, Serialize};
 use suffix::SuffixTable;
 
+mod suffix_table_serde {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::borrow::Cow;
+    use suffix::SuffixTable;
+
+    #[derive(Serialize, Deserialize)]
+    struct Helper<'s, 't> {
+        text: Cow<'s, str>,
+        table: Cow<'t, [u32]>,
+    }
+
+    pub fn serialize<S>(suffix_table: &SuffixTable, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        Helper {
+            text: Cow::Borrowed(suffix_table.text()),
+            table: Cow::Borrowed(suffix_table.table()),
+        }
+        .serialize(serializer)
+    }
+
+    pub fn deserialize<'de, 's, 't, D>(deserializer: D) -> Result<SuffixTable<'s, 't>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = Helper::deserialize(deserializer)?;
+        Ok(SuffixTable::from_parts(s.text, s.table))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct Index {
     doc_offsets: Vec<u32>,
+
+    #[serde(with = "suffix_table_serde")]
     suffix_table: SuffixTable<'static, 'static>,
 }
 
