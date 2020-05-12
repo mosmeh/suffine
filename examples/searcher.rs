@@ -3,7 +3,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use suffine::Index;
 
 const OFFSET: usize = 50;
@@ -19,11 +19,8 @@ struct Database {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_filename = env::args().nth(1).ok_or("database filename required")?;
 
-    let db: Database = {
-        let mut buf = Vec::new();
-        File::open(db_filename)?.read_to_end(&mut buf)?;
-        bincode::deserialize(&buf)?
-    };
+    let reader = BufReader::new(File::open(db_filename)?);
+    let db: Database = bincode::deserialize_from(reader)?;
 
     print!("> ");
     io::stdout().flush()?;

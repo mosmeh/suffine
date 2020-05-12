@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter};
 use suffine::{Index, IndexBuilder};
 
 #[derive(Serialize, Deserialize)]
@@ -44,7 +44,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("Writing...");
-    File::create(db_filename)?.write_all(&bincode::serialize(&db)?)?;
+    let writer = BufWriter::new(File::create(db_filename)?);
+    bincode::serialize_into(writer, &db)?;
 
     Ok(())
 }
