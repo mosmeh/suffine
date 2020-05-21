@@ -1,11 +1,12 @@
-use crate::{slice_from_bytes, Index, Result};
-use byteorder::{NativeEndian, WriteBytesExt};
-use memmap::Mmap;
+use crate::{Index, Result};
+use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
-use std::io::{self, BufWriter};
+use std::fs::File;
+use std::io::{self, BufReader, BufWriter};
 use suffix::SuffixTable;
+use tempfile::NamedTempFile;
 
 pub struct IndexBuilder<'s> {
     text: &'s str,
@@ -81,18 +82,18 @@ fn build_suffix_array_to_writer<W: io::Write>(text: &str, len: usize, mut writer
 
 struct Block<'a> {
     text: &'a str,
-    mmap: Mmap,
+    reader: BufReader<File>,
     begin: usize,
-    cursor: usize,
+    front_index: u32,
 }
+
+impl Eq for Block<'_> {}
 
 impl PartialEq for Block<'_> {
     fn eq(&self, _: &Self) -> bool {
         unimplemented!()
     }
 }
-
-impl Eq for Block<'_> {}
 
 impl Ord for Block<'_> {
     fn cmp(&self, _: &Self) -> Ordering {
@@ -111,21 +112,19 @@ impl PartialOrd for Block<'_> {
 }
 
 impl Block<'_> {
-    fn suffix_array(&self) -> &[u32] {
-        unsafe { slice_from_bytes(&self.mmap) }
-    }
-
-    fn front_index(&self) -> usize {
-        self.suffix_array()[self.cursor] as usize
-    }
-
     fn front_suffix(&self) -> &str {
-        &self.text[self.front_index()..]
+        &self.text[self.front_index as usize..]
     }
 
-    fn next(&mut self) -> bool {
-        self.cursor += 1;
-        self.cursor < self.suffix_array().len()
+    fn next(mut self) -> Option<Self> {
+        match self.reader.read_u32::<NativeEndian>() {
+            Ok(x) => Some(Self {
+                front_index: x,
+                ..self
+            }),
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => None,
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -169,7 +168,7 @@ fn sort_blocks(text: &str, block_size: u32) -> Result<BinaryHeap<Reverse<Block>>
             }
         };
 
-        let file = tempfile::tempfile()?;
+        let file = NamedTempFile::new()?;
         {
             let writer = BufWriter::new(&file);
             build_suffix_array_to_writer(&text[begin..end_with_tail], end - begin, writer)?;
@@ -177,11 +176,11 @@ fn sort_blocks(text: &str, block_size: u32) -> Result<BinaryHeap<Reverse<Block>>
 
         let block = Block {
             text: &text[begin..],
-            mmap: unsafe { Mmap::map(&file)? },
+            reader: BufReader::new(file.reopen()?),
             begin,
-            cursor: 0,
+            front_index: 0,
         };
-        heap.push(Reverse(block));
+        heap.push(Reverse(block.next().unwrap()));
 
         begin = end;
     }
@@ -193,12 +192,12 @@ fn merge_blocks_to_writer<W: io::Write>(
     mut heap: BinaryHeap<Reverse<Block>>,
     mut writer: W,
 ) -> Result<()> {
-    while let Some(Reverse(mut block)) = heap.pop() {
-        let idx = (block.front_index() + block.begin) as u32;
+    while let Some(Reverse(block)) = heap.pop() {
+        let idx = block.front_index + block.begin as u32;
         writer.write_u32::<NativeEndian>(idx)?;
 
-        if block.next() {
-            heap.push(Reverse(block));
+        if let Some(next) = block.next() {
+            heap.push(Reverse(next));
         }
     }
 
