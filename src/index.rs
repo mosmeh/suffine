@@ -28,4 +28,71 @@ impl<'s, 't> Index<'s, 't> {
     pub fn suffix_array(&self) -> &[u32] {
         &self.suffix_array
     }
+
+    pub fn find_positions(&self, query: &str) -> &[u32] {
+        if self.text.is_empty() || query.is_empty() {
+            return &[];
+        }
+        let first_suffix = &self.text[self.suffix_array[0] as usize..];
+        let last_suffix = &self.text[self.suffix_array[self.suffix_array.len() - 1] as usize..];
+        if (query < first_suffix && !first_suffix.starts_with(query)) || query > last_suffix {
+            return &[];
+        }
+
+        let start = binary_search(&self.suffix_array, |&i| query <= &self.text[i as usize..]);
+        let end = start
+            + binary_search(&self.suffix_array[start..], |&i| {
+                !self.text[i as usize..].starts_with(query)
+            });
+
+        if start > end {
+            &[]
+        } else {
+            &self.suffix_array[start..end]
+        }
+    }
+}
+
+fn binary_search<T, F>(xs: &[T], mut pred: F) -> usize
+where
+    F: FnMut(&T) -> bool,
+{
+    let (mut left, mut right) = (0, xs.len());
+    while left < right {
+        let mid = (left + right) / 2;
+        if pred(&xs[mid]) {
+            right = mid;
+        } else {
+            left = mid + 1;
+        }
+    }
+    left
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::IndexBuilder;
+    use itertools::Itertools;
+
+    #[quickcheck]
+    fn find_positions(text: String) {
+        let index = IndexBuilder::new(&text).build_in_memory().unwrap();
+
+        assert!(index.find_positions("").is_empty());
+        assert!(index.find_positions(&format!("{}$", text)).is_empty());
+
+        for query_len in 1..text.chars().count() {
+            for query in text
+                .chars()
+                .chunks(query_len)
+                .into_iter()
+                .map(|c| c.collect::<String>())
+            {
+                let actual =
+                    itertools::sorted(index.find_positions(&query).iter()).map(|x| *x as usize);
+                let expected = text.match_indices(&query).map(|(i, _)| i);
+                assert!(actual.eq(expected));
+            }
+        }
+    }
 }
