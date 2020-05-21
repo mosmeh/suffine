@@ -211,12 +211,9 @@ mod tests {
     use itertools::Itertools;
 
     fn check_suffix_array(text: &str, suffix_array: &[u32]) {
-        let actual: Vec<u32> = itertools::sorted(suffix_array.iter()).map(|x| *x).collect();
-        let expected: Vec<u32> = (0..text.len())
-            .filter(|&x| text.is_char_boundary(x as usize))
-            .map(|x| x as u32)
-            .collect();
-        assert_eq!(actual, expected);
+        let actual = itertools::sorted(suffix_array.iter()).map(|x| *x as usize);
+        let expected = (0..text.len()).filter(|&x| text.is_char_boundary(x as usize));
+        assert!(actual.eq(expected));
 
         let sorted = suffix_array
             .iter()
