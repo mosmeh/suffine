@@ -26,55 +26,70 @@ impl<'s> IndexBuilder<'s> {
         self
     }
 
-    pub fn build_to_writer<W: std::io::Write>(&self, mut writer: W) -> Result<()> {
-        match self.text.len() {
-            0 => return Ok(()),
-            1 => {
-                writer.write_u32::<NativeEndian>(0)?;
-                return Ok(());
-            }
-            _ => (),
-        }
-
-        if self.text.len() <= self.block_size as usize {
-            build_suffix_array_to_writer(self.text, self.text.len(), writer)?;
-        } else {
-            let heap = sort_blocks(self.text, self.block_size)?;
-            merge_blocks_to_writer(heap, writer)?;
-        }
-
-        Ok(())
+    pub fn build(&self) -> Result<Index<'s, 'static>> {
+        let mut sa = VecWrapper(Vec::new());
+        build_suffix_array(self.text, self.block_size, &mut sa)?;
+        Index::from_parts(self.text, Cow::Owned(sa.0))
     }
 
-    pub fn build_in_memory(&self) -> Result<Index<'s, 'static>> {
-        let sa = build_suffix_array_in_memory(self.text);
-        Index::from_parts(self.text, Cow::Owned(sa))
+    pub fn build_to_writer<W: io::Write>(&self, writer: W) -> Result<()> {
+        build_suffix_array(self.text, self.block_size, writer)?;
+        Ok(())
     }
 }
 
-fn build_suffix_array_in_memory(text: &str) -> Vec<u32> {
+struct VecWrapper<T>(Vec<T>);
+
+trait IntBuffer<T> {
+    fn write(&mut self, n: T) -> Result<()>;
+}
+
+impl<T> IntBuffer<T> for &mut VecWrapper<T> {
+    fn write(&mut self, n: T) -> Result<()> {
+        self.0.push(n);
+        Ok(())
+    }
+}
+
+impl<W: io::Write> IntBuffer<u32> for W {
+    fn write(&mut self, n: u32) -> Result<()> {
+        self.write_u32::<NativeEndian>(n)?;
+        Ok(())
+    }
+}
+
+fn build_suffix_array<B: IntBuffer<u32>>(text: &str, block_size: u32, mut buffer: B) -> Result<()> {
     match text.len() {
-        0 => return Vec::new(),
-        1 => return vec![0],
+        0 => return Ok(()),
+        1 => {
+            buffer.write(0)?;
+            return Ok(());
+        }
         _ => (),
     }
 
-    SuffixTable::new(text)
-        .table()
-        .iter()
-        .filter(|&&x| text.is_char_boundary(x as usize))
-        .copied()
-        .collect()
+    if text.len() <= block_size as usize {
+        build_suffix_array_in_memory(text, text.len(), buffer)?;
+    } else {
+        let heap = sort_blocks(text, block_size)?;
+        merge_blocks(heap, buffer)?;
+    }
+
+    Ok(())
 }
 
-fn build_suffix_array_to_writer<W: io::Write>(text: &str, len: usize, mut writer: W) -> Result<()> {
+fn build_suffix_array_in_memory<B: IntBuffer<u32>>(
+    text: &str,
+    len: usize,
+    mut buffer: B,
+) -> Result<()> {
     let st = SuffixTable::new(text);
     let sa = st
         .table()
         .iter()
         .filter(|&&x| (x as usize) < len && text.is_char_boundary(x as usize));
     for x in sa {
-        writer.write_u32::<NativeEndian>(*x)?;
+        buffer.write(*x)?;
     }
 
     Ok(())
@@ -171,7 +186,7 @@ fn sort_blocks(text: &str, block_size: u32) -> Result<BinaryHeap<Reverse<Block>>
         let file = NamedTempFile::new()?;
         {
             let writer = BufWriter::new(&file);
-            build_suffix_array_to_writer(&text[begin..end_with_tail], end - begin, writer)?;
+            build_suffix_array_in_memory(&text[begin..end_with_tail], end - begin, writer)?;
         }
 
         let block = Block {
@@ -188,13 +203,13 @@ fn sort_blocks(text: &str, block_size: u32) -> Result<BinaryHeap<Reverse<Block>>
     Ok(heap)
 }
 
-fn merge_blocks_to_writer<W: io::Write>(
+fn merge_blocks<B: IntBuffer<u32>>(
     mut heap: BinaryHeap<Reverse<Block>>,
-    mut writer: W,
+    mut buffer: B,
 ) -> Result<()> {
     while let Some(Reverse(block)) = heap.pop() {
         let idx = block.front_index + block.begin as u32;
-        writer.write_u32::<NativeEndian>(idx)?;
+        buffer.write(idx)?;
 
         if let Some(next) = block.next() {
             heap.push(Reverse(next));
@@ -222,8 +237,20 @@ mod tests {
     }
 
     #[quickcheck]
-    fn build_in_memory(text: String) {
-        let index = IndexBuilder::new(&text).build_in_memory().unwrap();
+    fn build_with_blocks(text: String, block_size: u32) {
+        let index = IndexBuilder::new(&text)
+            .block_size(block_size)
+            .build()
+            .unwrap();
+        check_suffix_array(&text, &index.suffix_array());
+    }
+
+    #[quickcheck]
+    fn build_without_blocks(text: String) {
+        let index = IndexBuilder::new(&text)
+            .block_size(u32::MAX)
+            .build()
+            .unwrap();
         check_suffix_array(&text, &index.suffix_array());
     }
 

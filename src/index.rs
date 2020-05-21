@@ -75,7 +75,7 @@ mod tests {
     use itertools::Itertools;
 
     fn find_positions(text: &str) {
-        let index = IndexBuilder::new(text).build_in_memory().unwrap();
+        let index = IndexBuilder::new(text).build().unwrap();
 
         assert!(index.find_positions("").is_empty());
         assert!(index.find_positions(&format!("{}$", text)).is_empty());
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn nonexistence() {
-        let index = IndexBuilder::new("ab").build_in_memory().unwrap();
+        let index = IndexBuilder::new("ab").build().unwrap();
         assert!(index.find_positions("c").is_empty());
         assert!(index.find_positions("ba").is_empty());
         assert!(index.find_positions("bc").is_empty());
