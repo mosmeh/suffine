@@ -74,9 +74,8 @@ mod tests {
     use crate::IndexBuilder;
     use itertools::Itertools;
 
-    #[quickcheck]
-    fn find_positions(text: String) {
-        let index = IndexBuilder::new(&text).build_in_memory().unwrap();
+    fn find_positions(text: &str) {
+        let index = IndexBuilder::new(text).build_in_memory().unwrap();
 
         assert!(index.find_positions("").is_empty());
         assert!(index.find_positions(&format!("{}$", text)).is_empty());
@@ -98,5 +97,24 @@ mod tests {
                 assert!(actual.eq(expected));
             }
         }
+    }
+
+    #[quickcheck]
+    fn find_positions_qc(text: String) {
+        find_positions(&text);
+    }
+
+    #[test]
+    fn nonexistence() {
+        let index = IndexBuilder::new("ab").build_in_memory().unwrap();
+        assert!(index.find_positions("c").is_empty());
+        assert!(index.find_positions("ba").is_empty());
+        assert!(index.find_positions("bc").is_empty());
+    }
+
+    #[test]
+    fn exotic_characters() {
+        let text = "あ\0😅吉𠮷ééがが";
+        find_positions(text);
     }
 }
