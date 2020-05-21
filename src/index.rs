@@ -90,7 +90,11 @@ mod tests {
             {
                 let actual =
                     itertools::sorted(index.find_positions(&query).iter()).map(|x| *x as usize);
-                let expected = text.match_indices(&query).map(|(i, _)| i);
+                let expected = (0..text.len() - query.len() + 1).filter(|&i| {
+                    text.is_char_boundary(i)
+                        && text.is_char_boundary(i + query.len())
+                        && &text[i..i + query.len()] == query
+                });
                 assert!(actual.eq(expected));
             }
         }
