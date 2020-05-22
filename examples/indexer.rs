@@ -1,6 +1,6 @@
 use memmap::Mmap;
 use std::fs::File;
-use std::io::BufWriter;
+use std::io::{BufWriter, Write};
 use suffine::{IndexBuilder, Result};
 
 fn main() -> Result<()> {
@@ -10,10 +10,11 @@ fn main() -> Result<()> {
     let text_mmap = unsafe { Mmap::map(&File::open(text_filename)?)? };
     let text = std::str::from_utf8(&text_mmap)?;
 
-    let writer = BufWriter::new(File::create(index_filename)?);
+    let mut writer = BufWriter::new(File::create(index_filename)?);
     IndexBuilder::new(&text)
         .block_size(1024 * 1024 * 1024) // 1G
-        .build_to_writer(writer)?;
+        .build_to_writer(&mut writer)?;
+    writer.flush()?;
 
     Ok(())
 }

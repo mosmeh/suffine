@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter};
+use std::io::{self, BufReader, BufWriter, Write};
 use suffix::SuffixTable;
 use tempfile::NamedTempFile;
 
@@ -185,8 +185,9 @@ fn sort_blocks(text: &str, block_size: u32) -> Result<BinaryHeap<Reverse<Block>>
 
         let file = NamedTempFile::new()?;
         {
-            let writer = BufWriter::new(&file);
-            build_suffix_array_in_memory(&text[begin..end_with_tail], end - begin, writer)?;
+            let mut writer = BufWriter::new(&file);
+            build_suffix_array_in_memory(&text[begin..end_with_tail], end - begin, &mut writer)?;
+            writer.flush()?;
         }
 
         let block = Block {
