@@ -7,8 +7,8 @@ mod index;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-pub use build::IndexBuilder;
-pub use index::Index;
+pub use build::{IndexBuilder, MultiDocIndexBuilder};
+pub use index::{Index, MultiDocIndex};
 
 unsafe fn slice_from_bytes<T>(bytes: &[u8]) -> &[T] {
     assert_eq!(0, std::mem::size_of::<T>() % std::mem::size_of::<u8>());

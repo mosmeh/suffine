@@ -1,5 +1,6 @@
-use crate::{Index, Result};
+use crate::{Index, MultiDocIndex, Result};
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
+use itertools::Itertools;
 use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
@@ -35,6 +36,46 @@ impl<'a> IndexBuilder<'a> {
     pub fn build_to_writer<W: io::Write>(&self, writer: W) -> Result<()> {
         build_suffix_array(self.text, self.block_size, writer)?;
         Ok(())
+    }
+}
+
+pub struct MultiDocIndexBuilder<'a, 'b> {
+    index: Cow<'b, Index<'a, 'b>>,
+    delimiter: String,
+}
+
+impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
+    pub fn new<I>(index: I) -> Self
+    where
+        I: Into<Cow<'b, Index<'a, 'b>>>,
+    {
+        Self {
+            index: index.into(),
+            delimiter: "\n".to_string(),
+        }
+    }
+
+    pub fn delimiter(&mut self, delimiter: &str) -> &mut Self {
+        self.delimiter = delimiter.to_string();
+        self
+    }
+
+    pub fn build(&self) -> MultiDocIndex<'a, 'b> {
+        let delim_len = self.delimiter.len() as u32;
+        let offsets: Vec<u32> = [0]
+            .iter()
+            .copied()
+            .chain(
+                self.index
+                    .find_positions(&self.delimiter)
+                    .iter()
+                    .sorted()
+                    .dedup_by(|&a, &b| b - a < delim_len)
+                    .map(|x| x + delim_len),
+            )
+            .collect();
+
+        MultiDocIndex::from_parts(self.index.clone(), offsets, delim_len)
     }
 }
 
