@@ -8,13 +8,13 @@ use std::io::{self, BufReader, BufWriter, Write};
 use suffix::SuffixTable;
 use tempfile::NamedTempFile;
 
-pub struct IndexBuilder<'s> {
-    text: &'s str,
+pub struct IndexBuilder<'a> {
+    text: &'a str,
     block_size: u32,
 }
 
-impl<'s> IndexBuilder<'s> {
-    pub fn new(text: &'s str) -> IndexBuilder<'s> {
+impl<'a> IndexBuilder<'a> {
+    pub fn new(text: &'a str) -> IndexBuilder<'a> {
         IndexBuilder {
             text,
             block_size: u32::MAX,
@@ -26,7 +26,7 @@ impl<'s> IndexBuilder<'s> {
         self
     }
 
-    pub fn build(&self) -> Result<Index<'s, 'static>> {
+    pub fn build(&self) -> Result<Index<'a, 'static>> {
         let mut sa = VecWrapper(Vec::new());
         build_suffix_array(self.text, self.block_size, &mut sa)?;
         Index::from_parts(self.text, Cow::Owned(sa.0))
