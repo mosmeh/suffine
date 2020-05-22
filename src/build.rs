@@ -1,7 +1,5 @@
-use crate::{Index, MultiDocIndex, Result};
+use crate::Result;
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
-use itertools::Itertools;
-use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::fs::File;
@@ -9,79 +7,9 @@ use std::io::{self, BufReader, BufWriter, Write};
 use suffix::SuffixTable;
 use tempfile::NamedTempFile;
 
-pub struct IndexBuilder<'a> {
-    text: &'a str,
-    block_size: u32,
-}
+pub struct VecWrapper<T>(pub Vec<T>);
 
-impl<'a> IndexBuilder<'a> {
-    pub fn new(text: &'a str) -> IndexBuilder<'a> {
-        IndexBuilder {
-            text,
-            block_size: u32::MAX,
-        }
-    }
-
-    pub fn block_size(&mut self, block_size: u32) -> &mut Self {
-        self.block_size = block_size.max(1);
-        self
-    }
-
-    pub fn build(&self) -> Result<Index<'a, 'static>> {
-        let mut sa = VecWrapper(Vec::new());
-        build_suffix_array(self.text, self.block_size, &mut sa)?;
-        Index::from_parts(self.text, Cow::Owned(sa.0))
-    }
-
-    pub fn build_to_writer<W: io::Write>(&self, writer: W) -> Result<()> {
-        build_suffix_array(self.text, self.block_size, writer)?;
-        Ok(())
-    }
-}
-
-pub struct MultiDocIndexBuilder<'a, 'b> {
-    index: Cow<'b, Index<'a, 'b>>,
-    delimiter: String,
-}
-
-impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
-    pub fn new<I>(index: I) -> Self
-    where
-        I: Into<Cow<'b, Index<'a, 'b>>>,
-    {
-        Self {
-            index: index.into(),
-            delimiter: "\n".to_string(),
-        }
-    }
-
-    pub fn delimiter(&mut self, delimiter: &str) -> &mut Self {
-        self.delimiter = delimiter.to_string();
-        self
-    }
-
-    pub fn build(&self) -> MultiDocIndex<'a, 'b> {
-        let delim_len = self.delimiter.len() as u32;
-        let offsets: Vec<u32> = [0]
-            .iter()
-            .copied()
-            .chain(
-                self.index
-                    .find_positions(&self.delimiter)
-                    .iter()
-                    .sorted()
-                    .dedup_by(|&a, &b| b - a < delim_len)
-                    .map(|x| x + delim_len),
-            )
-            .collect();
-
-        MultiDocIndex::from_parts(self.index.clone(), offsets, delim_len)
-    }
-}
-
-struct VecWrapper<T>(Vec<T>);
-
-trait IntBuffer<T> {
+pub trait IntBuffer<T> {
     fn write(&mut self, n: T) -> Result<()>;
 }
 
@@ -99,7 +27,11 @@ impl<W: io::Write> IntBuffer<u32> for W {
     }
 }
 
-fn build_suffix_array<B: IntBuffer<u32>>(text: &str, block_size: u32, mut buffer: B) -> Result<()> {
+pub fn build_suffix_array<B: IntBuffer<u32>>(
+    text: &str,
+    block_size: u32,
+    mut buffer: B,
+) -> Result<()> {
     match text.len() {
         0 => return Ok(()),
         1 => {

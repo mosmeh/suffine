@@ -1,5 +1,8 @@
-use crate::{slice_from_bytes, Result};
+use crate::build::{build_suffix_array, VecWrapper};
+use crate::Result;
+use itertools::Itertools;
 use std::borrow::Cow;
+use std::io;
 
 #[derive(Clone)]
 pub struct Index<'a, 'b> {
@@ -8,18 +11,11 @@ pub struct Index<'a, 'b> {
 }
 
 impl<'a, 'b> Index<'a, 'b> {
-    pub fn from_parts<S>(text: &'a str, suffix_array: S) -> Result<Index<'a, 'b>>
-    where
-        S: Into<Cow<'b, [u32]>>,
-    {
+    pub fn from_bytes(text: &'a str, bytes: &'b [u8]) -> Result<Index<'a, 'b>> {
         Ok(Index {
             text,
-            suffix_array: suffix_array.into(),
+            suffix_array: Cow::Borrowed(unsafe { slice_from_bytes(bytes) }),
         })
-    }
-
-    pub fn from_bytes(text: &'a str, bytes: &'b [u8]) -> Result<Index<'a, 'b>> {
-        Index::from_parts(text, unsafe { slice_from_bytes(bytes) })
     }
 
     pub fn text(&self) -> &str {
@@ -66,6 +62,41 @@ impl<'a, 'b> From<Cow<'b, Index<'a, 'b>>> for Index<'a, 'b> {
     }
 }
 
+#[derive(Clone)]
+pub struct IndexBuilder<'a> {
+    text: &'a str,
+    block_size: u32,
+}
+
+impl<'a> IndexBuilder<'a> {
+    pub fn new(text: &'a str) -> IndexBuilder<'a> {
+        IndexBuilder {
+            text,
+            block_size: u32::MAX,
+        }
+    }
+
+    pub fn block_size(&mut self, block_size: u32) -> &mut Self {
+        self.block_size = block_size.max(1);
+        self
+    }
+
+    pub fn build(&self) -> Result<Index<'a, 'static>> {
+        let mut sa = VecWrapper(Vec::new());
+        build_suffix_array(self.text, self.block_size, &mut sa)?;
+        Ok(Index {
+            text: self.text,
+            suffix_array: Cow::Owned(sa.0),
+        })
+    }
+
+    pub fn build_to_writer<W: io::Write>(&self, writer: W) -> Result<()> {
+        build_suffix_array(self.text, self.block_size, writer)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
 pub struct MultiDocIndex<'a, 'b> {
     index: Cow<'b, Index<'a, 'b>>,
     offsets: Vec<u32>,
@@ -73,17 +104,6 @@ pub struct MultiDocIndex<'a, 'b> {
 }
 
 impl<'a, 'b> MultiDocIndex<'a, 'b> {
-    pub fn from_parts<I>(index: I, offsets: Vec<u32>, delim_len: u32) -> Self
-    where
-        I: Into<Cow<'b, Index<'a, 'b>>>,
-    {
-        Self {
-            index: index.into(),
-            offsets,
-            delim_len,
-        }
-    }
-
     pub fn index(&self) -> &Index<'a, 'b> {
         &self.index
     }
@@ -129,6 +149,51 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
     }
 }
 
+#[derive(Clone)]
+pub struct MultiDocIndexBuilder<'a, 'b> {
+    index: Cow<'b, Index<'a, 'b>>,
+    delimiter: String,
+}
+
+impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
+    pub fn new<I>(index: I) -> Self
+    where
+        I: Into<Cow<'b, Index<'a, 'b>>>,
+    {
+        Self {
+            index: index.into(),
+            delimiter: "\n".to_string(),
+        }
+    }
+
+    pub fn delimiter(&mut self, delimiter: &str) -> &mut Self {
+        self.delimiter = delimiter.to_string();
+        self
+    }
+
+    pub fn build(&self) -> MultiDocIndex<'a, 'b> {
+        let delim_len = self.delimiter.len() as u32;
+        let offsets: Vec<u32> = [0]
+            .iter()
+            .copied()
+            .chain(
+                self.index
+                    .find_positions(&self.delimiter)
+                    .iter()
+                    .sorted()
+                    .dedup_by(|&a, &b| b - a < delim_len)
+                    .map(|x| x + delim_len),
+            )
+            .collect();
+
+        MultiDocIndex {
+            index: self.index.clone(),
+            offsets,
+            delim_len,
+        }
+    }
+}
+
 fn binary_search<T, F>(xs: &[T], mut pred: F) -> usize
 where
     F: FnMut(&T) -> bool,
@@ -143,6 +208,17 @@ where
         }
     }
     left
+}
+
+unsafe fn slice_from_bytes<T>(bytes: &[u8]) -> &[T] {
+    assert_eq!(0, std::mem::size_of::<T>() % std::mem::size_of::<u8>());
+    assert_eq!(0, bytes.len() % std::mem::size_of::<T>());
+
+    let ratio = std::mem::size_of::<T>() / std::mem::size_of::<u8>();
+    let ptr = bytes.as_ptr() as *const T;
+    let length = bytes.len() / ratio;
+
+    std::slice::from_raw_parts(ptr, length)
 }
 
 #[cfg(test)]
