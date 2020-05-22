@@ -1,7 +1,7 @@
 use ansi_term::{Colour, Style};
 use memmap::Mmap;
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, Write};
 use suffine::{Index, Result};
 
 const FIRST_N_OCCURRENCES: usize = 10;
@@ -22,7 +22,7 @@ fn main() -> Result<()> {
     print!("> ");
     io::stdout().flush()?;
 
-    for query in BufReader::new(io::stdin()).lines() {
+    for query in io::stdin().lock().lines() {
         let query = query?;
 
         for p in index
