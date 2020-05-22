@@ -74,37 +74,55 @@ mod tests {
     use crate::IndexBuilder;
     use itertools::Itertools;
 
-    fn find_positions(text: &str) {
+    fn find_positions_naive(text: &str, query: &str) -> Vec<usize> {
+        if text.len() < query.len() {
+            return Vec::new();
+        }
+
+        (0..=text.len() - query.len())
+            .filter(|&i| {
+                text.is_char_boundary(i)
+                    && text.is_char_boundary(i + query.len())
+                    && &text[i..i + query.len()] == query
+            })
+            .collect()
+    }
+
+    fn check_positions(text: &str) {
         let index = IndexBuilder::new(text).build().unwrap();
 
         assert!(index.find_positions("").is_empty());
         assert!(index.find_positions(&format!("{}$", text)).is_empty());
 
-        for query_len in 1..text.chars().count() {
-            for query in text
-                .chars()
-                .chunks(query_len)
-                .into_iter()
-                .map(|c| c.collect::<String>())
-            {
+        for end in 1..=text.len() {
+            if !text.is_char_boundary(end) {
+                continue;
+            }
+            for begin in 0..end {
+                if !text.is_char_boundary(begin) {
+                    continue;
+                }
+                let query = &text[begin..end];
                 let actual = index
                     .find_positions(&query)
                     .iter()
                     .sorted()
                     .map(|x| *x as usize);
-                let expected = (0..text.len() - query.len() + 1).filter(|&i| {
-                    text.is_char_boundary(i)
-                        && text.is_char_boundary(i + query.len())
-                        && &text[i..i + query.len()] == query
-                });
+                let expected = find_positions_naive(text, &query);
                 assert!(actual.eq(expected));
             }
         }
     }
 
     #[quickcheck]
-    fn find_positions_qc(text: String) {
-        find_positions(&text);
+    fn find_positions(text: String) {
+        check_positions(&text);
+    }
+
+    #[test]
+    fn exotic_characters() {
+        let text = "あ\0😅吉𠮷ééがが";
+        check_positions(text);
     }
 
     #[test]
@@ -113,11 +131,5 @@ mod tests {
         assert!(index.find_positions("c").is_empty());
         assert!(index.find_positions("ba").is_empty());
         assert!(index.find_positions("bc").is_empty());
-    }
-
-    #[test]
-    fn exotic_characters() {
-        let text = "あ\0😅吉𠮷ééがが";
-        find_positions(text);
     }
 }
