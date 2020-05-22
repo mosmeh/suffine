@@ -233,7 +233,7 @@ mod tests {
         let sorted = suffix_array
             .iter()
             .tuple_windows()
-            .all(|(a, b)| &text[*a as usize..] < &text[*b as usize..]);
+            .all(|(a, b)| text[*a as usize..] < text[*b as usize..]);
         assert!(sorted);
     }
 
