@@ -48,7 +48,7 @@ fn main() -> Result<()> {
         println!("Building index...");
         let text_file = File::open(&text_filename)?;
         let text_mmap = unsafe { Mmap::map(&text_file)? };
-        let text = std::str::from_utf8(&text_mmap)?;
+        let text = unsafe { std::str::from_utf8_unchecked(&text_mmap) };
 
         let index_file = File::create(format!("{}.index", index_filename_prefix))?;
         let mut index_writer = BufWriter::new(index_file);

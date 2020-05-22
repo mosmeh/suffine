@@ -12,7 +12,7 @@ fn main() -> Result<()> {
     let index_filename = std::env::args().nth(2).ok_or("index filename required")?;
 
     let text_mmap = unsafe { Mmap::map(&File::open(text_filename)?)? };
-    let text = std::str::from_utf8(&text_mmap)?;
+    let text = unsafe { std::str::from_utf8_unchecked(&text_mmap) };
 
     let index_mmap = unsafe { Mmap::map(&File::open(index_filename)?)? };
     let index = Index::from_bytes(&text, &index_mmap)?;

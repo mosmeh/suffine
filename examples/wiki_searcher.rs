@@ -16,7 +16,7 @@ fn main() -> Result<()> {
 
     let text_file = File::open(format!("{}.text", index_filename_prefix))?;
     let text_mmap = unsafe { Mmap::map(&text_file)? };
-    let text = std::str::from_utf8(&text_mmap)?;
+    let text = unsafe { std::str::from_utf8_unchecked(&text_mmap) };
 
     let index_file = File::open(format!("{}.index", index_filename_prefix))?;
     let index_mmap = unsafe { Mmap::map(&index_file)? };
