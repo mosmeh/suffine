@@ -12,6 +12,13 @@ pub struct Index<'a, 'b> {
 
 impl<'a, 'b> Index<'a, 'b> {
     pub fn from_bytes(text: &'a str, bytes: &'b [u8]) -> Result<Index<'a, 'b>> {
+        if text.len() > u32::MAX as usize {
+            return Err(crate::Error::TextTooLong);
+        }
+        if bytes.len() * std::mem::size_of::<u8>() / std::mem::size_of::<u32>() > text.len() {
+            return Err(crate::Error::InvalidIndex);
+        }
+
         Ok(Index {
             text,
             suffix_array: Cow::Borrowed(unsafe { slice_from_bytes(bytes) }),
@@ -27,7 +34,7 @@ impl<'a, 'b> Index<'a, 'b> {
     }
 
     pub fn find_positions(&self, query: &str) -> &[u32] {
-        if self.text.is_empty() || query.is_empty() {
+        if self.text.is_empty() || query.is_empty() || query.len() > self.text.len() {
             return &[];
         }
         let first_suffix = &self.text[self.suffix_array[0] as usize..];
@@ -77,11 +84,15 @@ impl<'a> IndexBuilder<'a> {
     }
 
     pub fn block_size(&mut self, block_size: u32) -> &mut Self {
-        self.block_size = block_size.max(1);
+        self.block_size = block_size;
         self
     }
 
     pub fn build(&self) -> Result<Index<'a, 'static>> {
+        if self.text.len() > u32::MAX as usize {
+            return Err(crate::Error::TextTooLong);
+        }
+
         let mut sa = VecWrapper(Vec::new());
         build_suffix_array(self.text, self.block_size, &mut sa)?;
         Ok(Index {
@@ -91,8 +102,16 @@ impl<'a> IndexBuilder<'a> {
     }
 
     pub fn build_to_writer<W: io::Write>(&self, writer: W) -> Result<()> {
-        build_suffix_array(self.text, self.block_size, writer)?;
-        Ok(())
+        if self.text.len() > u32::MAX as usize {
+            return Err(crate::Error::TextTooLong);
+        }
+        if self.block_size == 0 {
+            return Err(crate::Error::InvalidOption(
+                "block size cannot be 0".to_string(),
+            ));
+        }
+
+        build_suffix_array(self.text, self.block_size, writer).map_err(Into::into)
     }
 }
 
@@ -171,7 +190,13 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
         self
     }
 
-    pub fn build(&self) -> MultiDocIndex<'a, 'b> {
+    pub fn build(&self) -> Result<MultiDocIndex<'a, 'b>> {
+        if self.delimiter.is_empty() {
+            return Err(crate::Error::InvalidOption(
+                "delimiter cannot be empty string".to_string(),
+            ));
+        }
+
         let delim_len = self.delimiter.len() as u32;
         let offsets: Vec<u32> = [0]
             .iter()
@@ -186,11 +211,11 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
             )
             .collect();
 
-        MultiDocIndex {
+        Ok(MultiDocIndex {
             index: self.index.clone(),
             offsets,
             delim_len,
-        }
+        })
     }
 }
 
@@ -295,7 +320,10 @@ mod tests {
         let texts: Vec<&str> = text.split(&delim).collect();
 
         let index = IndexBuilder::new(&text).build().unwrap();
-        let multi_doc_index = MultiDocIndexBuilder::new(&index).delimiter(&delim).build();
+        let multi_doc_index = MultiDocIndexBuilder::new(&index)
+            .delimiter(&delim)
+            .build()
+            .unwrap();
 
         assert!(multi_doc_index.find_positions("").is_empty());
 
@@ -320,7 +348,10 @@ mod tests {
         let texts: Vec<&str> = text.split(&delim).collect();
 
         let index = IndexBuilder::new(&text).build().unwrap();
-        let multi_doc_index = MultiDocIndexBuilder::new(&index).delimiter(&delim).build();
+        let multi_doc_index = MultiDocIndexBuilder::new(&index)
+            .delimiter(&delim)
+            .build()
+            .unwrap();
 
         for t in texts.iter() {
             for end in 1..=t.len() {

@@ -22,8 +22,7 @@ impl<T> IntBuffer<T> for &mut VecWrapper<T> {
 
 impl<W: io::Write> IntBuffer<u32> for W {
     fn write(&mut self, n: u32) -> Result<()> {
-        self.write_u32::<NativeEndian>(n)?;
-        Ok(())
+        self.write_u32::<NativeEndian>(n).map_err(Into::into)
     }
 }
 
@@ -197,6 +196,7 @@ fn merge_blocks<B: IntBuffer<u32>>(
 mod tests {
     use crate::{Index, IndexBuilder};
     use itertools::Itertools;
+    use quickcheck::TestResult;
 
     fn check_suffix_array(text: &str, suffix_array: &[u32]) {
         let actual = suffix_array.iter().sorted().map(|x| *x as usize);
@@ -211,12 +211,18 @@ mod tests {
     }
 
     #[quickcheck]
-    fn build_with_blocks(text: String, block_size: u32) {
+    fn build_with_blocks(text: String, block_size: u32) -> TestResult {
+        if block_size == 0 {
+            return TestResult::discard();
+        }
+
         let index = IndexBuilder::new(&text)
             .block_size(block_size)
             .build()
             .unwrap();
         check_suffix_array(&text, &index.suffix_array());
+
+        TestResult::passed()
     }
 
     #[quickcheck]
@@ -229,7 +235,11 @@ mod tests {
     }
 
     #[quickcheck]
-    fn build_to_writer_with_blocks(text: String, block_size: u32) {
+    fn build_to_writer_with_blocks(text: String, block_size: u32) -> TestResult {
+        if block_size == 0 {
+            return TestResult::discard();
+        }
+
         let mut buf = Vec::new();
         IndexBuilder::new(&text)
             .block_size(block_size)
@@ -237,6 +247,8 @@ mod tests {
             .unwrap();
         let index = Index::from_bytes(&text, &buf).unwrap();
         check_suffix_array(&text, &index.suffix_array());
+
+        TestResult::passed()
     }
 
     #[quickcheck]

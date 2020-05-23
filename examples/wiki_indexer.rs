@@ -1,8 +1,9 @@
+use anyhow::{anyhow, Result};
 use memmap::Mmap;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
-use suffine::{IndexBuilder, Result};
+use suffine::IndexBuilder;
 
 #[derive(Serialize, Deserialize)]
 struct Article {
@@ -15,10 +16,10 @@ struct Article {
 fn main() -> Result<()> {
     let json_filename = std::env::args()
         .nth(1)
-        .ok_or("input json filename required")?;
+        .ok_or_else(|| anyhow!("input json filename required"))?;
     let index_filename_prefix = std::env::args()
         .nth(2)
-        .ok_or("output filename prefix required")?;
+        .ok_or_else(|| anyhow!("output filename prefix required"))?;
 
     let text_filename = format!("{}.text", index_filename_prefix);
     {

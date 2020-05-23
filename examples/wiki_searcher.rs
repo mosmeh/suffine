@@ -1,9 +1,10 @@
 use ansi_term::{Colour, Style};
+use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use memmap::Mmap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
-use suffine::{Index, MultiDocIndexBuilder, Result};
+use suffine::{Index, MultiDocIndexBuilder};
 
 const FIRST_N_OCCURRENCES: usize = 3;
 const TOP_K_ARTICLES: usize = 10;
@@ -12,7 +13,7 @@ const OFFSET: usize = 50;
 fn main() -> Result<()> {
     let index_filename_prefix = std::env::args()
         .nth(1)
-        .ok_or("index filename prefix required")?;
+        .ok_or_else(|| anyhow!("index filename prefix required"))?;
 
     let text_file = File::open(format!("{}.text", index_filename_prefix))?;
     let text_mmap = unsafe { Mmap::map(&text_file)? };
@@ -22,7 +23,7 @@ fn main() -> Result<()> {
     let index_mmap = unsafe { Mmap::map(&index_file)? };
 
     let index = Index::from_bytes(text, &index_mmap)?;
-    let multi_doc_index = MultiDocIndexBuilder::new(&index).delimiter("\0").build();
+    let multi_doc_index = MultiDocIndexBuilder::new(&index).delimiter("\0").build()?;
 
     let title_file = File::open(format!("{}.title", index_filename_prefix))?;
     let title_reader = BufReader::new(title_file);
@@ -48,7 +49,9 @@ fn main() -> Result<()> {
         for (doc_id, positions) in hits {
             println!("{}", highlighted.paint(&titles[doc_id as usize]));
 
-            let doc_text = multi_doc_index.doc(doc_id).ok_or("document not found")?;
+            let doc_text = multi_doc_index
+                .doc(doc_id)
+                .ok_or_else(|| anyhow!("document not found"))?;
 
             for pos in positions.iter().take(FIRST_N_OCCURRENCES) {
                 let pos = *pos as usize;
