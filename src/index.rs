@@ -57,6 +57,12 @@ impl<'a, 'b> Index<'a, 'b> {
     }
 }
 
+impl<'a, 'b> From<Index<'a, 'b>> for Cow<'b, Index<'a, 'b>> {
+    fn from(index: Index<'a, 'b>) -> Cow<'b, Index<'a, 'b>> {
+        Cow::Owned(index)
+    }
+}
+
 impl<'a, 'b> From<&'b Index<'a, 'b>> for Cow<'b, Index<'a, 'b>> {
     fn from(index: &'b Index<'a, 'b>) -> Cow<'b, Index<'a, 'b>> {
         Cow::Borrowed(index)
@@ -320,7 +326,7 @@ mod tests {
         let texts: Vec<&str> = text.split(&delim).collect();
 
         let index = IndexBuilder::new(&text).build().unwrap();
-        let multi_doc_index = MultiDocIndexBuilder::new(&index)
+        let multi_doc_index = MultiDocIndexBuilder::new(index)
             .delimiter(&delim)
             .build()
             .unwrap();
@@ -348,7 +354,7 @@ mod tests {
         let texts: Vec<&str> = text.split(&delim).collect();
 
         let index = IndexBuilder::new(&text).build().unwrap();
-        let multi_doc_index = MultiDocIndexBuilder::new(&index)
+        let multi_doc_index = MultiDocIndexBuilder::new(index)
             .delimiter(&delim)
             .build()
             .unwrap();

@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     let index_mmap = unsafe { Mmap::map(&index_file)? };
 
     let index = Index::from_bytes(text, &index_mmap)?;
-    let multi_doc_index = MultiDocIndexBuilder::new(&index).delimiter("\0").build()?;
+    let multi_doc_index = MultiDocIndexBuilder::new(index).delimiter("\0").build()?;
 
     let title_file = File::open(format!("{}.title", index_filename_prefix))?;
     let title_reader = BufReader::new(title_file);

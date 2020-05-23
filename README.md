@@ -52,7 +52,7 @@ Violets are blue,
 sugar is sweet,
 And so are you.";
 let index = IndexBuilder::new(text).build().unwrap();
-let multi_doc_index = MultiDocIndexBuilder::new(&index)
+let multi_doc_index = MultiDocIndexBuilder::new(index)
     .delimiter("\n")
     .build()
     .unwrap();
