@@ -56,7 +56,7 @@ fn main() -> Result<()> {
 
         IndexBuilder::new(text)
             .block_size(1024 * 1024 * 1024) // 1G
-            .build_to_writer(&mut index_writer)?;
+            .build_to_writer_native_endian(&mut index_writer)?;
 
         index_writer.flush()?;
     }

@@ -1,5 +1,5 @@
 use crate::Result;
-use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, NativeEndian, ReadBytesExt, WriteBytesExt};
 use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::fs::File;
@@ -9,28 +9,32 @@ use tempfile::NamedTempFile;
 
 pub struct VecWrapper<T>(pub Vec<T>);
 
-pub trait IntBuffer<T> {
+pub trait IntBuffer<T, O: ByteOrder> {
     fn write(&mut self, n: T) -> Result<()>;
 }
 
-impl<T> IntBuffer<T> for &mut VecWrapper<T> {
+impl<T> IntBuffer<T, NativeEndian> for &mut VecWrapper<T> {
     fn write(&mut self, n: T) -> Result<()> {
         self.0.push(n);
         Ok(())
     }
 }
 
-impl<W: io::Write> IntBuffer<u32> for W {
+impl<W, O> IntBuffer<u32, O> for W
+where
+    W: io::Write,
+    O: ByteOrder,
+{
     fn write(&mut self, n: u32) -> Result<()> {
-        self.write_u32::<NativeEndian>(n).map_err(Into::into)
+        self.write_u32::<O>(n).map_err(Into::into)
     }
 }
 
-pub fn build_suffix_array<B: IntBuffer<u32>>(
-    text: &str,
-    block_size: u32,
-    mut buffer: B,
-) -> Result<()> {
+pub fn build_suffix_array<B, O>(text: &str, block_size: u32, mut buffer: B) -> Result<()>
+where
+    B: IntBuffer<u32, O>,
+    O: ByteOrder,
+{
     match text.len() {
         0 => return Ok(()),
         1 => {
@@ -50,11 +54,11 @@ pub fn build_suffix_array<B: IntBuffer<u32>>(
     Ok(())
 }
 
-fn build_suffix_array_in_memory<B: IntBuffer<u32>>(
-    text: &str,
-    len: usize,
-    mut buffer: B,
-) -> Result<()> {
+fn build_suffix_array_in_memory<B, O>(text: &str, len: usize, mut buffer: B) -> Result<()>
+where
+    B: IntBuffer<u32, O>,
+    O: ByteOrder,
+{
     let st = SuffixTable::new(text);
     let sa = st
         .table()
@@ -158,7 +162,11 @@ fn sort_blocks(text: &str, block_size: u32) -> Result<BinaryHeap<Reverse<Block>>
         let file = NamedTempFile::new()?;
         {
             let mut writer = BufWriter::new(&file);
-            build_suffix_array_in_memory(&text[begin..end_with_tail], end - begin, &mut writer)?;
+            build_suffix_array_in_memory::<_, NativeEndian>(
+                &text[begin..end_with_tail],
+                end - begin,
+                &mut writer,
+            )?;
             writer.flush()?;
         }
 
@@ -176,10 +184,11 @@ fn sort_blocks(text: &str, block_size: u32) -> Result<BinaryHeap<Reverse<Block>>
     Ok(heap)
 }
 
-fn merge_blocks<B: IntBuffer<u32>>(
-    mut heap: BinaryHeap<Reverse<Block>>,
-    mut buffer: B,
-) -> Result<()> {
+fn merge_blocks<B, O>(mut heap: BinaryHeap<Reverse<Block>>, mut buffer: B) -> Result<()>
+where
+    B: IntBuffer<u32, O>,
+    O: ByteOrder,
+{
     while let Some(Reverse(block)) = heap.pop() {
         let idx = block.front_index + block.begin as u32;
         buffer.write(idx)?;
@@ -243,7 +252,7 @@ mod tests {
         let mut buf = Vec::new();
         IndexBuilder::new(&text)
             .block_size(block_size)
-            .build_to_writer(&mut buf)
+            .build_to_writer_native_endian(&mut buf)
             .unwrap();
         let index = Index::from_bytes(&text, &buf).unwrap();
         check_suffix_array(&text, &index.suffix_array());
@@ -256,7 +265,7 @@ mod tests {
         let mut buf = Vec::new();
         IndexBuilder::new(&text)
             .block_size(u32::MAX)
-            .build_to_writer(&mut buf)
+            .build_to_writer_native_endian(&mut buf)
             .unwrap();
         let index = Index::from_bytes(&text, &buf).unwrap();
         check_suffix_array(&text, &index.suffix_array());

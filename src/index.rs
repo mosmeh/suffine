@@ -1,5 +1,6 @@
 use crate::build::{build_suffix_array, VecWrapper};
 use crate::Result;
+use byteorder::{BigEndian, LittleEndian, NativeEndian};
 use itertools::Itertools;
 use std::borrow::Cow;
 use std::io;
@@ -111,9 +112,21 @@ impl<'a> IndexBuilder<'a> {
         })
     }
 
-    pub fn build_to_writer<W: io::Write>(&self, writer: W) -> Result<()> {
+    pub fn build_to_writer_little_endian<W: io::Write>(&self, writer: W) -> Result<()> {
         self.check_options()?;
-        build_suffix_array(self.text, self.block_size, writer).map_err(Into::into)
+        build_suffix_array::<_, LittleEndian>(self.text, self.block_size, writer)
+            .map_err(Into::into)
+    }
+
+    pub fn build_to_writer_big_endian<W: io::Write>(&self, writer: W) -> Result<()> {
+        self.check_options()?;
+        build_suffix_array::<_, BigEndian>(self.text, self.block_size, writer).map_err(Into::into)
+    }
+
+    pub fn build_to_writer_native_endian<W: io::Write>(&self, writer: W) -> Result<()> {
+        self.check_options()?;
+        build_suffix_array::<_, NativeEndian>(self.text, self.block_size, writer)
+            .map_err(Into::into)
     }
 
     fn check_options(&self) -> Result<()> {

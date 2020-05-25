@@ -28,7 +28,7 @@ use std::io::BufWriter;
 let writer = BufWriter::new(File::create("index").unwrap());
 IndexBuilder::new(text)
     .block_size(1024 * 1024)
-    .build_to_writer(writer)
+    .build_to_writer_native_endian(writer)
     .unwrap();
 ```
 
