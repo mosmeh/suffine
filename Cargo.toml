@@ -12,6 +12,7 @@ readme = "README.md"
 license-file = "LICENSE"
 
 [dependencies]
+bytemuck = "1.2.0"
 byteorder = "1.3.4"
 itertools = "0.9.0"
 suffix = "1.2.0"

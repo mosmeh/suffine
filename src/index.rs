@@ -15,13 +15,19 @@ impl<'a, 'b> Index<'a, 'b> {
         if text.len() > u32::MAX as usize {
             return Err(crate::Error::TextTooLong);
         }
-        if bytes.len() * std::mem::size_of::<u8>() / std::mem::size_of::<u32>() > text.len() {
+
+        let suffix_array = if bytes.is_empty() {
+            &[]
+        } else {
+            bytemuck::try_cast_slice(&bytes).or(Err(crate::Error::InvalidIndex))?
+        };
+        if suffix_array.len() > text.len() {
             return Err(crate::Error::InvalidIndex);
         }
 
         Ok(Index {
             text,
-            suffix_array: Cow::Borrowed(unsafe { slice_from_bytes(bytes) }),
+            suffix_array: std::borrow::Cow::Borrowed(suffix_array),
         })
     }
 
@@ -239,17 +245,6 @@ where
         }
     }
     left
-}
-
-unsafe fn slice_from_bytes<T>(bytes: &[u8]) -> &[T] {
-    assert_eq!(0, std::mem::size_of::<T>() % std::mem::size_of::<u8>());
-    assert_eq!(0, bytes.len() % std::mem::size_of::<T>());
-
-    let ratio = std::mem::size_of::<T>() / std::mem::size_of::<u8>();
-    let ptr = bytes.as_ptr() as *const T;
-    let length = bytes.len() / ratio;
-
-    std::slice::from_raw_parts(ptr, length)
 }
 
 #[cfg(test)]
