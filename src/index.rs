@@ -101,9 +101,7 @@ impl<'a> IndexBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<Index<'a, 'static>> {
-        if self.text.len() > u32::MAX as usize {
-            return Err(crate::Error::TextTooLong);
-        }
+        self.check_options()?;
 
         let mut sa = VecWrapper(Vec::new());
         build_suffix_array(self.text, self.block_size, &mut sa)?;
@@ -114,6 +112,11 @@ impl<'a> IndexBuilder<'a> {
     }
 
     pub fn build_to_writer<W: io::Write>(&self, writer: W) -> Result<()> {
+        self.check_options()?;
+        build_suffix_array(self.text, self.block_size, writer).map_err(Into::into)
+    }
+
+    fn check_options(&self) -> Result<()> {
         if self.text.len() > u32::MAX as usize {
             return Err(crate::Error::TextTooLong);
         }
@@ -123,7 +126,7 @@ impl<'a> IndexBuilder<'a> {
             ));
         }
 
-        build_suffix_array(self.text, self.block_size, writer).map_err(Into::into)
+        Ok(())
     }
 }
 
