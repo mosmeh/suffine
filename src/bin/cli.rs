@@ -59,7 +59,11 @@ fn search(matches: &ArgMatches) -> Result<()> {
         .delimiter(&delimiter)
         .build()?;
 
-    let highlighted = Style::new().bold().fg(Color::Green);
+    let highlighted = if matches.is_present("nocolor") {
+        Style::new()
+    } else {
+        Style::new().bold().fg(Color::Green)
+    };
 
     for (doc_id, pos) in multi_doc_index.find_positions(&query).iter().take(count) {
         if let Some(doc_text) = multi_doc_index.doc(*doc_id) {
@@ -93,6 +97,7 @@ fn main() -> Result<()> {
             (@arg index: -i --index +takes_value "Suffine index filepath")
             (@arg delimiter: -d --delimiter +takes_value "String used to separate items. Defaults to newline character")
             (@arg count: -n +takes_value "Outputs first <count> hits")
+            (@arg nocolor: --("no-color") "Prints outputs without color")
         )
     )
     .get_matches();
