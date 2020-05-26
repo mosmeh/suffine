@@ -48,13 +48,24 @@ fn search(matches: &ArgMatches) -> Result<()> {
     let (text_filename, index_filename) = get_filenames(&matches)?;
     let query = value_t!(matches, "QUERY", String)?;
     let delimiter = value_t!(matches, "delimiter", String).unwrap_or_else(|_| "\n".to_string());
-    let count = value_t!(matches, "count", usize).unwrap_or(usize::MAX);
+    let nhits = value_t!(matches, "nhits", usize).unwrap_or(usize::MAX);
 
     let text_mmap = open_and_map(&text_filename)?;
     let text = unsafe { std::str::from_utf8_unchecked(&text_mmap) };
     let index_mmap = open_and_map(&index_filename)?;
 
     let index = Index::from_bytes(text, &index_mmap)?;
+
+    if matches.is_present("count") {
+        let count = if query.contains(&delimiter) {
+            0
+        } else {
+            index.find_positions(&query).len()
+        };
+        println!("{}", count);
+        return Ok(());
+    }
+
     let multi_doc_index = MultiDocIndexBuilder::new(index)
         .delimiter(&delimiter)
         .build()?;
@@ -65,7 +76,7 @@ fn search(matches: &ArgMatches) -> Result<()> {
         Style::new().bold().fg(Color::Green)
     };
 
-    for (doc_id, pos) in multi_doc_index.find_positions(&query).iter().take(count) {
+    for (doc_id, pos) in multi_doc_index.find_positions(&query).iter().take(nhits) {
         if let Some(doc_text) = multi_doc_index.doc(*doc_id) {
             let pos = *pos as usize;
             println!(
@@ -96,8 +107,9 @@ fn main() -> Result<()> {
             (@arg QUERY: * -q --query +takes_value "Query string")
             (@arg index: -i --index +takes_value "Suffine index filepath")
             (@arg delimiter: -d --delimiter +takes_value "String used to separate items. Defaults to newline character")
-            (@arg count: -n +takes_value "Outputs first <count> hits")
-            (@arg nocolor: --("no-color") "Prints outputs without color")
+            (@arg nhits: -n +takes_value "Outputs first <nhits> hits")
+            (@arg nocolor: --("no-color") "Prints all output without color")
+            (@arg count: -c --count conflicts_with("nhits") "Counts hits without listing")
         )
     )
     .get_matches();
