@@ -5,7 +5,8 @@ use memmap::Mmap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use suffine::{Index, IndexBuilder, MultiDocIndexBuilder};
+use suffine::{Index, IndexBuilder, MultiDocIndex, MultiDocIndexBuilder};
+use tempfile::NamedTempFile;
 
 fn get_filenames(matches: &ArgMatches) -> Result<(PathBuf, PathBuf)> {
     let text_filename = value_t!(matches, "FILE", PathBuf)?;
@@ -29,46 +30,50 @@ fn index(matches: &ArgMatches) -> Result<()> {
     let block_size = value_t!(matches, "block", u32)
         .map(|x| x * 1024 * 1024)
         .unwrap_or(u32::MAX);
+    let delimiter = value_t!(matches, "delimiter", String).unwrap_or_else(|_| "\n".to_string());
 
     let text_mmap = open_and_map(&text_filename)?;
     let text = unsafe { std::str::from_utf8_unchecked(&text_mmap) };
-    let index_file = File::create(&index_filename)?;
-    let mut writer = BufWriter::new(index_file);
+    let index_file = NamedTempFile::new()?;
+    {
+        let mut index_writer = BufWriter::new(&index_file);
+        IndexBuilder::new(&text)
+            .block_size(block_size)
+            .build_to_writer_native_endian(&mut index_writer)?;
+        index_writer.flush()?;
+    }
 
-    IndexBuilder::new(&text)
-        .block_size(block_size)
-        .build_to_writer_native_endian(&mut writer)?;
+    let index_file = index_file.reopen()?;
+    let index_bytes = unsafe { Mmap::map(&index_file)? };
+    let index = Index::from_bytes(&text, &index_bytes)?;
 
-    writer.flush()?;
+    let m_index_file = File::create(index_filename)?;
+    let mut m_index_writer = BufWriter::new(m_index_file);
+
+    MultiDocIndexBuilder::new(index)
+        .delimiter(&delimiter)
+        .build_to_writer_native_endian(&mut m_index_writer)?;
+
+    m_index_writer.flush()?;
 
     Ok(())
 }
 
 fn search(matches: &ArgMatches) -> Result<()> {
-    let (text_filename, index_filename) = get_filenames(&matches)?;
+    let (text_filename, index_filename) = get_filenames(matches)?;
     let query = value_t!(matches, "QUERY", String)?;
-    let delimiter = value_t!(matches, "delimiter", String).unwrap_or_else(|_| "\n".to_string());
     let nhits = value_t!(matches, "nhits", usize).unwrap_or(usize::MAX);
 
     let text_mmap = open_and_map(&text_filename)?;
     let text = unsafe { std::str::from_utf8_unchecked(&text_mmap) };
-    let index_mmap = open_and_map(&index_filename)?;
 
-    let index = Index::from_bytes(text, &index_mmap)?;
+    let m_index_mmap = open_and_map(index_filename)?;
+    let multi_doc_index = MultiDocIndex::from_bytes(text, &m_index_mmap)?;
 
     if matches.is_present("count") {
-        let count = if query.contains(&delimiter) {
-            0
-        } else {
-            index.find_positions(&query).len()
-        };
-        println!("{}", count);
+        println!("{}", multi_doc_index.find_positions(&query).len());
         return Ok(());
     }
-
-    let multi_doc_index = MultiDocIndexBuilder::new(index)
-        .delimiter(&delimiter)
-        .build()?;
 
     let highlighted = if matches.is_present("nocolor") {
         Style::new()
@@ -101,6 +106,7 @@ fn main() -> Result<()> {
             (@arg FILE: * "File containing the text to index")
             (@arg index: -i --index +takes_value "Suffine index filepath")
             (@arg block: -b --block +takes_value "Block size in MB. By default index is built in single large block")
+            (@arg delimiter: -d --delimiter +takes_value "String used to separate items. Defaults to newline character")
         )
         (@subcommand search =>
             (@arg FILE: * "File containing the text")

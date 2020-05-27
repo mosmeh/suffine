@@ -1,11 +1,12 @@
-use crate::build::{build_suffix_array, VecWrapper};
+use crate::build::{build_suffix_array, IntBuffer, VecWrapper};
 use crate::Result;
-use byteorder::{BigEndian, LittleEndian, NativeEndian};
+use byteorder::{BigEndian, ByteOrder, LittleEndian, NativeEndian, ReadBytesExt, WriteBytesExt};
 use itertools::Itertools;
 use std::borrow::Cow;
-use std::io;
+use std::io::Write;
+use std::mem;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Index<'a, 'b> {
     text: &'a str,
     suffix_array: Cow<'b, [u32]>,
@@ -102,34 +103,31 @@ impl<'a> IndexBuilder<'a> {
     }
 
     pub fn build(&self) -> Result<Index<'a, 'static>> {
-        self.check_options()?;
-
         let mut sa = VecWrapper(Vec::new());
-        build_suffix_array(self.text, self.block_size, &mut sa)?;
+        self.build_to_buffer(&mut sa)?;
         Ok(Index {
             text: self.text,
             suffix_array: Cow::Owned(sa.0),
         })
     }
 
-    pub fn build_to_writer_little_endian<W: io::Write>(&self, writer: W) -> Result<()> {
-        self.check_options()?;
-        build_suffix_array::<_, LittleEndian>(self.text, self.block_size, writer)
-            .map_err(Into::into)
+    pub fn build_to_writer_little_endian<W: Write>(&self, writer: W) -> Result<()> {
+        self.build_to_buffer::<W, LittleEndian>(writer)
     }
 
-    pub fn build_to_writer_big_endian<W: io::Write>(&self, writer: W) -> Result<()> {
-        self.check_options()?;
-        build_suffix_array::<_, BigEndian>(self.text, self.block_size, writer).map_err(Into::into)
+    pub fn build_to_writer_big_endian<W: Write>(&self, writer: W) -> Result<()> {
+        self.build_to_buffer::<W, BigEndian>(writer)
     }
 
-    pub fn build_to_writer_native_endian<W: io::Write>(&self, writer: W) -> Result<()> {
-        self.check_options()?;
-        build_suffix_array::<_, NativeEndian>(self.text, self.block_size, writer)
-            .map_err(Into::into)
+    pub fn build_to_writer_native_endian<W: Write>(&self, writer: W) -> Result<()> {
+        self.build_to_buffer::<W, NativeEndian>(writer)
     }
 
-    fn check_options(&self) -> Result<()> {
+    fn build_to_buffer<B, O>(&self, buffer: B) -> Result<()>
+    where
+        B: IntBuffer<u32, O>,
+        O: ByteOrder,
+    {
         if self.text.len() > u32::MAX as usize {
             return Err(crate::Error::TextTooLong);
         }
@@ -138,12 +136,11 @@ impl<'a> IndexBuilder<'a> {
                 "block size cannot be 0".to_string(),
             ));
         }
-
-        Ok(())
+        build_suffix_array(self.text, self.block_size, buffer)
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct MultiDocIndex<'a, 'b> {
     index: Cow<'b, Index<'a, 'b>>,
     offsets: Vec<u32>,
@@ -151,6 +148,50 @@ pub struct MultiDocIndex<'a, 'b> {
 }
 
 impl<'a, 'b> MultiDocIndex<'a, 'b> {
+    pub fn from_bytes(text: &'a str, bytes: &'b [u8]) -> Result<MultiDocIndex<'a, 'b>> {
+        /* format:
+               index.suffix_array
+               offsets
+               footer
+        */
+        const FOOTER_SIZE: usize = mem::size_of::<u32>()
+            * (
+                // index.suffix_array.len()
+                1
+                // offsets.len()
+                + 1
+                // delim_len
+                + 1
+            );
+
+        // footer
+        let mut cursor = std::io::Cursor::new(&bytes[bytes.len() - FOOTER_SIZE..]);
+        let sa_len = cursor.read_u32::<NativeEndian>()? as usize;
+        let offsets_len = cursor.read_u32::<NativeEndian>()? as usize;
+        let delim_len = cursor.read_u32::<NativeEndian>()?;
+
+        let sa_size = mem::size_of::<u32>() * sa_len;
+        let offsets_size = mem::size_of::<u32>() * offsets_len;
+
+        if bytes.len() != sa_size + offsets_size + FOOTER_SIZE {
+            return Err(crate::Error::InvalidIndex);
+        }
+
+        // body
+        let sa_bytes = &bytes[0..sa_size];
+        let index = Index::from_bytes(text, sa_bytes)?;
+
+        let offsets_bytes = &bytes[sa_size..sa_size + offsets_size];
+        let offsets = bytemuck::try_cast_slice(&offsets_bytes)
+            .or_else(|_| Err(crate::Error::InvalidIndex))?;
+
+        Ok(MultiDocIndex {
+            index: Cow::Owned(index),
+            offsets: offsets.to_vec(),
+            delim_len,
+        })
+    }
+
     pub fn index(&self) -> &Index<'a, 'b> {
         &self.index
     }
@@ -219,14 +260,54 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
     }
 
     pub fn build(&self) -> Result<MultiDocIndex<'a, 'b>> {
+        Ok(MultiDocIndex {
+            index: self.index.clone(),
+            offsets: self.calc_offsets()?,
+            delim_len: self.delimiter.len() as u32,
+        })
+    }
+
+    pub fn build_to_writer_little_endian<W: Write>(&self, writer: W) -> Result<()> {
+        self.build_to_writer::<W, LittleEndian>(writer)
+    }
+
+    pub fn build_to_writer_big_endian<W: Write>(&self, writer: W) -> Result<()> {
+        self.build_to_writer::<W, BigEndian>(writer)
+    }
+
+    pub fn build_to_writer_native_endian<W: Write>(&self, writer: W) -> Result<()> {
+        self.build_to_writer::<W, NativeEndian>(writer)
+    }
+
+    fn build_to_writer<W, O>(&self, mut writer: W) -> Result<()>
+    where
+        W: Write,
+        O: ByteOrder,
+    {
+        // See MultiDocIndex::from_bytes for format
+
+        // body
+        let offsets = self.calc_offsets()?;
+        for x in self.index.suffix_array().iter().chain(offsets.iter()) {
+            writer.write_u32::<O>(*x)?;
+        }
+
+        // footer
+        writer.write_u32::<O>(self.index.suffix_array().len() as u32)?;
+        writer.write_u32::<O>(offsets.len() as u32)?;
+        writer.write_u32::<O>(self.delimiter.len() as u32)?;
+
+        Ok(())
+    }
+
+    fn calc_offsets(&self) -> Result<Vec<u32>> {
         if self.delimiter.is_empty() {
             return Err(crate::Error::InvalidOption(
                 "delimiter cannot be empty string".to_string(),
             ));
         }
 
-        let delim_len = self.delimiter.len() as u32;
-        let offsets: Vec<u32> = [0]
+        let offsets = [0]
             .iter()
             .copied()
             .chain(
@@ -234,16 +315,11 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
                     .find_positions(&self.delimiter)
                     .iter()
                     .sorted()
-                    .dedup_by(|&a, &b| b - a < delim_len)
-                    .map(|x| x + delim_len),
+                    .dedup_by(|&a, &b| b - a < self.delimiter.len() as u32)
+                    .map(|x| x + self.delimiter.len() as u32),
             )
             .collect();
-
-        Ok(MultiDocIndex {
-            index: self.index.clone(),
-            offsets,
-            delim_len,
-        })
+        Ok(offsets)
     }
 }
 
@@ -265,7 +341,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{IndexBuilder, MultiDocIndexBuilder};
+    use crate::{Index, IndexBuilder, MultiDocIndex, MultiDocIndexBuilder};
     use itertools::Itertools;
     use quickcheck::TestResult;
 
@@ -326,6 +402,41 @@ mod tests {
         assert!(index.find_positions("c").is_empty());
         assert!(index.find_positions("ba").is_empty());
         assert!(index.find_positions("bc").is_empty());
+    }
+
+    #[quickcheck]
+    fn deserialize_index(text: String) {
+        let a = IndexBuilder::new(&text).build().unwrap();
+
+        let mut buf = Vec::new();
+        IndexBuilder::new(&text)
+            .build_to_writer_native_endian(&mut buf)
+            .unwrap();
+        let b = Index::from_bytes(&text, &buf).unwrap();
+
+        assert_eq!(a, b);
+    }
+
+    #[quickcheck]
+    fn deserialize_multi_doc_index(texts: Vec<String>, delim: String) -> TestResult {
+        if delim.is_empty() {
+            return TestResult::discard();
+        }
+
+        let text = texts.iter().join(&delim);
+        let index = IndexBuilder::new(&text).build().unwrap();
+
+        let a = MultiDocIndexBuilder::new(&index).build().unwrap();
+
+        let mut buf = Vec::new();
+        MultiDocIndexBuilder::new(&index)
+            .build_to_writer_native_endian(&mut buf)
+            .unwrap();
+        let b = MultiDocIndex::from_bytes(&text, &buf).unwrap();
+
+        assert_eq!(a, b);
+
+        TestResult::passed()
     }
 
     #[quickcheck]
