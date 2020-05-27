@@ -7,6 +7,7 @@ use std::io::{self, BufReader, BufWriter, Write};
 use suffix::SuffixTable;
 use tempfile::NamedTempFile;
 
+#[derive(PartialEq, Debug)]
 pub struct VecWrapper<T>(pub Vec<T>);
 
 pub trait IntBuffer<T, O: ByteOrder> {
@@ -22,7 +23,7 @@ impl<T> IntBuffer<T, NativeEndian> for &mut VecWrapper<T> {
 
 impl<W, O> IntBuffer<u32, O> for W
 where
-    W: io::Write,
+    W: Write,
     O: ByteOrder,
 {
     fn write(&mut self, n: u32) -> Result<()> {
@@ -203,7 +204,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{Index, IndexBuilder};
+    use crate::build::{build_suffix_array, VecWrapper};
     use itertools::Itertools;
     use quickcheck::TestResult;
 
@@ -220,54 +221,21 @@ mod tests {
     }
 
     #[quickcheck]
-    fn build_with_blocks(text: String, block_size: u32) -> TestResult {
+    fn build(text: String, block_size: u32) -> TestResult {
         if block_size == 0 {
             return TestResult::discard();
         }
 
-        let index = IndexBuilder::new(&text)
-            .block_size(block_size)
-            .build()
-            .unwrap();
-        check_suffix_array(&text, &index.suffix_array());
+        let mut buf_a = VecWrapper(Vec::new());
+        build_suffix_array(&text, block_size, &mut buf_a).unwrap();
+
+        let mut buf_b = VecWrapper(Vec::new());
+        build_suffix_array(&text, u32::MAX, &mut buf_b).unwrap();
+
+        assert_eq!(buf_a, buf_b);
+
+        check_suffix_array(&text, &buf_a.0);
 
         TestResult::passed()
-    }
-
-    #[quickcheck]
-    fn build_without_blocks(text: String) {
-        let index = IndexBuilder::new(&text)
-            .block_size(u32::MAX)
-            .build()
-            .unwrap();
-        check_suffix_array(&text, &index.suffix_array());
-    }
-
-    #[quickcheck]
-    fn build_to_writer_with_blocks(text: String, block_size: u32) -> TestResult {
-        if block_size == 0 {
-            return TestResult::discard();
-        }
-
-        let mut buf = Vec::new();
-        IndexBuilder::new(&text)
-            .block_size(block_size)
-            .build_to_writer_native_endian(&mut buf)
-            .unwrap();
-        let index = Index::from_bytes(&text, &buf).unwrap();
-        check_suffix_array(&text, &index.suffix_array());
-
-        TestResult::passed()
-    }
-
-    #[quickcheck]
-    fn build_to_writer_without_blocks(text: String) {
-        let mut buf = Vec::new();
-        IndexBuilder::new(&text)
-            .block_size(u32::MAX)
-            .build_to_writer_native_endian(&mut buf)
-            .unwrap();
-        let index = Index::from_bytes(&text, &buf).unwrap();
-        check_suffix_array(&text, &index.suffix_array());
     }
 }
