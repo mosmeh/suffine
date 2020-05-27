@@ -210,6 +210,10 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
             .collect()
     }
 
+    pub fn num_docs(&self) -> usize {
+        self.offsets.len()
+    }
+
     pub fn doc(&self, doc_id: u32) -> Option<&str> {
         let doc_id = doc_id as usize;
         if doc_id >= self.offsets.len() {
@@ -451,6 +455,7 @@ mod tests {
 
         assert!(multi_doc_index.positions("").is_empty());
 
+        assert_eq!(texts.len(), multi_doc_index.num_docs());
         assert!(texts
             .iter()
             .enumerate()
