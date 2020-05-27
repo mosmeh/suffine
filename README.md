@@ -56,5 +56,8 @@ let multi_doc_index = MultiDocIndexBuilder::new(index)
     .delimiter("\n")
     .build()
     .unwrap();
-assert_eq!(multi_doc_index.positions("are"), [(1, 8), (0, 6), (3, 7)]);
+let result = multi_doc_index
+    .doc_positions("are")
+    .collect::<Vec<(u32, u32)>>();
+assert_eq!(result, [(1, 8), (0, 6), (3, 7)]);
 ```

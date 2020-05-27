@@ -5,6 +5,7 @@ use itertools::Itertools;
 use std::borrow::Cow;
 use std::io::Write;
 use std::mem;
+use std::slice::Iter;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Index<'a, 'b> {
@@ -140,6 +141,37 @@ impl<'a> IndexBuilder<'a> {
     }
 }
 
+pub struct DocPositions<'a, 'b> {
+    iter: Iter<'a, u32>,
+    offsets: &'b [u32],
+    max_len: u32,
+}
+
+impl Iterator for DocPositions<'_, '_> {
+    type Item = (u32, u32);
+
+    fn next(&mut self) -> Option<(u32, u32)> {
+        while let Some(p) = self.iter.next() {
+            if let Some(doc_id) = self.doc_id_from_pos(*p) {
+                let pos_in_doc = p - self.offsets[doc_id as usize];
+                return Some((doc_id, pos_in_doc));
+            }
+        }
+        None
+    }
+}
+
+impl DocPositions<'_, '_> {
+    fn doc_id_from_pos(&self, pos: u32) -> Option<u32> {
+        let end = pos + self.max_len;
+        match self.offsets.binary_search(&pos) {
+            Ok(x) if x == self.offsets.len() - 1 || end <= self.offsets[x + 1] => Some(x as u32),
+            Err(x) if x == self.offsets.len() || end <= self.offsets[x] => Some((x - 1) as u32),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Debug)]
 pub struct MultiDocIndex<'a, 'b> {
     index: Cow<'b, Index<'a, 'b>>,
@@ -196,18 +228,12 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
         &self.index
     }
 
-    pub fn positions(&self, query: &str) -> Vec<(u32, u32)> {
-        self.index
-            .positions(&query)
-            .iter()
-            .filter_map(|p| {
-                self.doc_id_from_range(*p, *p + query.len() as u32)
-                    .map(|doc_id| {
-                        let pos_in_doc = p - self.offsets[doc_id as usize];
-                        (doc_id, pos_in_doc)
-                    })
-            })
-            .collect()
+    pub fn doc_positions(&self, query: &str) -> DocPositions {
+        DocPositions {
+            iter: self.index.positions(&query).iter(),
+            offsets: &self.offsets,
+            max_len: query.len() as u32 + self.delim_len,
+        }
     }
 
     pub fn num_docs(&self) -> usize {
@@ -226,18 +252,6 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
             (self.offsets[doc_id + 1] - self.delim_len) as usize
         };
         Some(&self.index.text()[begin..end])
-    }
-
-    fn doc_id_from_range(&self, begin: u32, end: u32) -> Option<u32> {
-        match self.offsets.binary_search(&begin) {
-            Ok(x) if x == self.offsets.len() - 1 || end + self.delim_len <= self.offsets[x + 1] => {
-                Some(x as u32)
-            }
-            Err(x) if x == self.offsets.len() || end + self.delim_len <= self.offsets[x] => {
-                Some((x - 1) as u32)
-            }
-            _ => None,
-        }
     }
 }
 
@@ -311,9 +325,7 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
             ));
         }
 
-        let offsets = [0]
-            .iter()
-            .copied()
+        let offsets = std::iter::once(0)
             .chain(
                 self.index
                     .positions(&self.delimiter)
@@ -453,7 +465,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(multi_doc_index.positions("").is_empty());
+        assert_eq!(0, multi_doc_index.doc_positions("").count());
 
         assert_eq!(texts.len(), multi_doc_index.num_docs());
         assert!(texts
@@ -493,7 +505,7 @@ mod tests {
                     }
                     let query = &t[begin..end];
 
-                    let actual = multi_doc_index.positions(&query).iter().copied().sorted();
+                    let actual = multi_doc_index.doc_positions(&query).sorted();
                     let expected = texts
                         .iter()
                         .enumerate()

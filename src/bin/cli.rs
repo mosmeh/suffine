@@ -71,7 +71,7 @@ fn search(matches: &ArgMatches) -> Result<()> {
     let multi_doc_index = MultiDocIndex::from_bytes(text, &m_index_mmap)?;
 
     if matches.is_present("count") {
-        println!("{}", multi_doc_index.positions(&query).len());
+        println!("{}", multi_doc_index.doc_positions(&query).count());
         return Ok(());
     }
 
@@ -81,9 +81,9 @@ fn search(matches: &ArgMatches) -> Result<()> {
         Style::new().bold().fg(Color::Green)
     };
 
-    for (doc_id, pos) in multi_doc_index.positions(&query).iter().take(nhits) {
-        if let Some(doc_text) = multi_doc_index.doc(*doc_id) {
-            let pos = *pos as usize;
+    for (doc_id, pos) in multi_doc_index.doc_positions(&query).take(nhits) {
+        if let Some(doc_text) = multi_doc_index.doc(doc_id) {
+            let pos = pos as usize;
             println!(
                 "{}{}{}",
                 &doc_text[..pos],
