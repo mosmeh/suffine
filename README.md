@@ -16,7 +16,7 @@ let index = IndexBuilder::new(text)
     .block_size(1024 * 1024)
     .build()
     .unwrap();
-assert_eq!(index.find_positions("cream"), &[30, 44, 15, 3]);
+assert_eq!(index.positions("cream"), &[30, 44, 15, 3]);
 ```
 
 Or you can directly build on a disk:
@@ -56,8 +56,5 @@ let multi_doc_index = MultiDocIndexBuilder::new(index)
     .delimiter("\n")
     .build()
     .unwrap();
-assert_eq!(
-    multi_doc_index.find_positions("are"),
-    [(1, 8), (0, 6), (3, 7)]
-);
+assert_eq!(multi_doc_index.positions("are"), [(1, 8), (0, 6), (3, 7)]);
 ```

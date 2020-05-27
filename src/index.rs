@@ -41,7 +41,7 @@ impl<'a, 'b> Index<'a, 'b> {
         &self.suffix_array
     }
 
-    pub fn find_positions(&self, query: &str) -> &[u32] {
+    pub fn positions(&self, query: &str) -> &[u32] {
         if self.text.is_empty() || query.is_empty() || query.len() > self.text.len() {
             return &[];
         }
@@ -196,9 +196,9 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
         &self.index
     }
 
-    pub fn find_positions(&self, query: &str) -> Vec<(u32, u32)> {
+    pub fn positions(&self, query: &str) -> Vec<(u32, u32)> {
         self.index
-            .find_positions(&query)
+            .positions(&query)
             .iter()
             .filter_map(|p| {
                 self.doc_id_from_range(*p, *p + query.len() as u32)
@@ -312,7 +312,7 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
             .copied()
             .chain(
                 self.index
-                    .find_positions(&self.delimiter)
+                    .positions(&self.delimiter)
                     .iter()
                     .sorted()
                     .dedup_by(|&a, &b| b - a < self.delimiter.len() as u32)
@@ -345,7 +345,7 @@ mod tests {
     use itertools::Itertools;
     use quickcheck::TestResult;
 
-    fn find_positions_naive(text: &str, query: &str) -> Vec<usize> {
+    fn positions_naive(text: &str, query: &str) -> Vec<usize> {
         if text.len() < query.len() {
             return Vec::new();
         }
@@ -362,8 +362,8 @@ mod tests {
     fn check_positions(text: &str) {
         let index = IndexBuilder::new(text).build().unwrap();
 
-        assert!(index.find_positions("").is_empty());
-        assert!(index.find_positions(&format!("{}$", text)).is_empty());
+        assert!(index.positions("").is_empty());
+        assert!(index.positions(&format!("{}$", text)).is_empty());
 
         for end in 1..=text.len() {
             if !text.is_char_boundary(end) {
@@ -374,19 +374,15 @@ mod tests {
                     continue;
                 }
                 let query = &text[begin..end];
-                let actual = index
-                    .find_positions(&query)
-                    .iter()
-                    .sorted()
-                    .map(|x| *x as usize);
-                let expected = find_positions_naive(text, &query);
+                let actual = index.positions(&query).iter().sorted().map(|x| *x as usize);
+                let expected = positions_naive(text, &query);
                 assert!(actual.eq(expected));
             }
         }
     }
 
     #[quickcheck]
-    fn find_positions(text: String) {
+    fn positions(text: String) {
         check_positions(&text);
     }
 
@@ -399,9 +395,9 @@ mod tests {
     #[test]
     fn nonexistence() {
         let index = IndexBuilder::new("ab").build().unwrap();
-        assert!(index.find_positions("c").is_empty());
-        assert!(index.find_positions("ba").is_empty());
-        assert!(index.find_positions("bc").is_empty());
+        assert!(index.positions("c").is_empty());
+        assert!(index.positions("ba").is_empty());
+        assert!(index.positions("bc").is_empty());
     }
 
     #[quickcheck]
@@ -453,7 +449,7 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(multi_doc_index.find_positions("").is_empty());
+        assert!(multi_doc_index.positions("").is_empty());
 
         assert!(texts
             .iter()
@@ -492,16 +488,12 @@ mod tests {
                     }
                     let query = &t[begin..end];
 
-                    let actual = multi_doc_index
-                        .find_positions(&query)
-                        .iter()
-                        .copied()
-                        .sorted();
+                    let actual = multi_doc_index.positions(&query).iter().copied().sorted();
                     let expected = texts
                         .iter()
                         .enumerate()
                         .map(|(i, u)| {
-                            find_positions_naive(u, &query)
+                            positions_naive(u, &query)
                                 .into_iter()
                                 .map(|p| (i as u32, p as u32))
                                 .collect::<Vec<(_, _)>>()

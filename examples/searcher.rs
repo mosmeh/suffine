@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         let query = query?;
 
         for p in index
-            .find_positions(&query)
+            .positions(&query)
             .iter()
             .take(FIRST_N_OCCURRENCES)
             .map(|x| *x as usize)
