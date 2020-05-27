@@ -143,7 +143,7 @@ impl<'a> IndexBuilder<'a> {
 #[derive(Clone, PartialEq, Debug)]
 pub struct MultiDocIndex<'a, 'b> {
     index: Cow<'b, Index<'a, 'b>>,
-    offsets: Vec<u32>,
+    offsets: Cow<'b, [u32]>,
     delim_len: u32,
 }
 
@@ -187,7 +187,7 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
 
         Ok(MultiDocIndex {
             index: Cow::Owned(index),
-            offsets: offsets.to_vec(),
+            offsets: Cow::Borrowed(&offsets),
             delim_len,
         })
     }
@@ -262,7 +262,7 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
     pub fn build(&self) -> Result<MultiDocIndex<'a, 'b>> {
         Ok(MultiDocIndex {
             index: self.index.clone(),
-            offsets: self.calc_offsets()?,
+            offsets: Cow::Owned(self.calc_offsets()?),
             delim_len: self.delimiter.len() as u32,
         })
     }
