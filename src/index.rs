@@ -3,7 +3,7 @@ use crate::Result;
 use byteorder::{BigEndian, ByteOrder, LittleEndian, NativeEndian, ReadBytesExt, WriteBytesExt};
 use itertools::Itertools;
 use std::borrow::Cow;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::mem;
 use std::slice::Iter;
 
@@ -30,7 +30,7 @@ impl<'a, 'b> Index<'a, 'b> {
 
         Ok(Index {
             text,
-            suffix_array: std::borrow::Cow::Borrowed(suffix_array),
+            suffix_array: Cow::Borrowed(suffix_array),
         })
     }
 
@@ -197,7 +197,7 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
             );
 
         // footer
-        let mut cursor = std::io::Cursor::new(&bytes[bytes.len() - FOOTER_SIZE..]);
+        let mut cursor = Cursor::new(&bytes[bytes.len() - FOOTER_SIZE..]);
         let sa_len = cursor.read_u32::<NativeEndian>()? as usize;
         let offsets_len = cursor.read_u32::<NativeEndian>()? as usize;
         let delim_len = cursor.read_u32::<NativeEndian>()?;
