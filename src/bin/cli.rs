@@ -71,7 +71,7 @@ fn search(matches: &ArgMatches) -> Result<()> {
     let multi_doc_index = MultiDocIndex::from_bytes(text, &m_index_mmap)?;
 
     if matches.is_present("count") {
-        println!("{}", multi_doc_index.doc_positions(&query).count());
+        println!("{}", multi_doc_index.freq(&query));
         return Ok(());
     }
 

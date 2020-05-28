@@ -42,6 +42,10 @@ impl<'a, 'b> Index<'a, 'b> {
         &self.suffix_array
     }
 
+    pub fn freq(&self, query: &str) -> usize {
+        self.positions(query).len()
+    }
+
     pub fn positions(&self, query: &str) -> &[u32] {
         if self.text.is_empty() || query.is_empty() || query.len() > self.text.len() {
             return &[];
@@ -234,6 +238,14 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
         &self.index
     }
 
+    pub fn freq(&self, query: &str) -> usize {
+        if query.contains(self.delimiter) {
+            0
+        } else {
+            self.index.positions(query).len()
+        }
+    }
+
     pub fn doc_positions(&self, query: &str) -> DocPositions {
         if query.contains(self.delimiter) {
             return DocPositions {
@@ -386,7 +398,9 @@ mod tests {
     fn check_positions(text: &str) {
         let index = IndexBuilder::new(text).build().unwrap();
 
+        assert_eq!(0, index.freq(""));
         assert!(index.positions("").is_empty());
+        assert_eq!(0, index.freq(&format!("{}$", text)));
         assert!(index.positions(&format!("{}$", text)).is_empty());
 
         for end in 1..=text.len() {
@@ -398,9 +412,15 @@ mod tests {
                     continue;
                 }
                 let query = &text[begin..end];
-                let actual = index.positions(&query).iter().sorted().map(|x| *x as usize);
+                let actual = index
+                    .positions(&query)
+                    .iter()
+                    .sorted()
+                    .map(|x| *x as usize)
+                    .collect::<Vec<_>>();
                 let expected = positions_naive(text, &query);
-                assert!(actual.eq(expected));
+                assert_eq!(actual, expected);
+                assert_eq!(index.freq(&query), expected.len());
             }
         }
     }
@@ -465,7 +485,10 @@ mod tests {
             .build()
             .unwrap();
 
+        assert_eq!(0, multi_doc_index.freq(""));
         assert_eq!(0, multi_doc_index.doc_positions("").count());
+
+        assert_eq!(0, multi_doc_index.freq(&delim_str));
 
         assert_eq!(texts.len(), multi_doc_index.num_docs());
         assert!(texts
@@ -502,6 +525,8 @@ mod tests {
 
                     let query_a = format!("{}{}", query, delim);
                     let query_b = format!("{}{}", delim, query);
+                    assert_eq!(0, multi_doc_index.freq(&query_a));
+                    assert_eq!(0, multi_doc_index.freq(&query_b));
                     assert_eq!(0, multi_doc_index.doc_positions(&query_a).count());
                     assert_eq!(0, multi_doc_index.doc_positions(&query_b).count());
 
@@ -513,10 +538,12 @@ mod tests {
                             positions_naive(u, &query)
                                 .into_iter()
                                 .map(|p| (i as u32, p as u32))
-                                .collect::<Vec<(_, _)>>()
+                                .collect::<Vec<_>>()
                                 .into_iter()
                         })
-                        .flatten();
+                        .flatten()
+                        .collect::<Vec<_>>();
+                    assert_eq!(multi_doc_index.freq(query), expected.len());
                     assert!(actual.eq(expected));
                 }
             }
