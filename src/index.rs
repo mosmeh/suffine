@@ -144,7 +144,6 @@ impl<'a> IndexBuilder<'a> {
 pub struct DocPositions<'a, 'b> {
     iter: Iter<'a, u32>,
     offsets: &'b [u32],
-    max_len: u32,
 }
 
 impl Iterator for DocPositions<'_, '_> {
@@ -163,11 +162,9 @@ impl Iterator for DocPositions<'_, '_> {
 
 impl DocPositions<'_, '_> {
     fn doc_id_from_pos(&self, pos: u32) -> Option<u32> {
-        let end = pos + self.max_len;
         match self.offsets.binary_search(&pos) {
-            Ok(x) if x == self.offsets.len() - 1 || end <= self.offsets[x + 1] => Some(x as u32),
-            Err(x) if x == self.offsets.len() || end <= self.offsets[x] => Some((x - 1) as u32),
-            _ => None,
+            Ok(x) => Some(x as u32),
+            Err(x) => Some((x - 1) as u32),
         }
     }
 }
@@ -176,7 +173,7 @@ impl DocPositions<'_, '_> {
 pub struct MultiDocIndex<'a, 'b> {
     index: Cow<'b, Index<'a, 'b>>,
     offsets: Cow<'b, [u32]>,
-    delim_len: u32,
+    delimiter: char,
 }
 
 impl<'a, 'b> MultiDocIndex<'a, 'b> {
@@ -184,6 +181,7 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
         /* format:
                index.suffix_array
                offsets
+               delimiter
                footer
         */
         const FOOTER_SIZE: usize = mem::size_of::<u32>()
@@ -200,12 +198,13 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
         let mut cursor = Cursor::new(&bytes[bytes.len() - FOOTER_SIZE..]);
         let sa_len = cursor.read_u32::<NativeEndian>()? as usize;
         let offsets_len = cursor.read_u32::<NativeEndian>()? as usize;
-        let delim_len = cursor.read_u32::<NativeEndian>()?;
+        let delim_len = cursor.read_u32::<NativeEndian>()? as usize;
 
         let sa_size = mem::size_of::<u32>() * sa_len;
         let offsets_size = mem::size_of::<u32>() * offsets_len;
+        let delim_size = mem::size_of::<u8>() * delim_len;
 
-        if bytes.len() != sa_size + offsets_size + FOOTER_SIZE {
+        if bytes.len() != sa_size + offsets_size + delim_size + FOOTER_SIZE {
             return Err(crate::Error::InvalidIndex);
         }
 
@@ -217,10 +216,17 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
         let offsets = bytemuck::try_cast_slice(&offsets_bytes)
             .or_else(|_| Err(crate::Error::InvalidIndex))?;
 
+        let delim_bytes = &bytes[sa_size + offsets_size..sa_size + offsets_size + delim_size];
+        let delimiter = std::str::from_utf8(&delim_bytes).or(Err(crate::Error::InvalidIndex))?;
+
+        if delimiter.chars().count() != 1 {
+            return Err(crate::Error::InvalidIndex);
+        }
+
         Ok(MultiDocIndex {
             index: Cow::Owned(index),
             offsets: Cow::Borrowed(&offsets),
-            delim_len,
+            delimiter: delimiter.chars().last().unwrap(),
         })
     }
 
@@ -229,10 +235,15 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
     }
 
     pub fn doc_positions(&self, query: &str) -> DocPositions {
+        if query.contains(self.delimiter) {
+            return DocPositions {
+                iter: [].iter(),
+                offsets: &[],
+            };
+        }
         DocPositions {
             iter: self.index.positions(&query).iter(),
             offsets: &self.offsets,
-            max_len: query.len() as u32 + self.delim_len,
         }
     }
 
@@ -249,7 +260,7 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
         let end = if doc_id == self.offsets.len() - 1 {
             self.index.text().len()
         } else {
-            (self.offsets[doc_id + 1] - self.delim_len) as usize
+            self.offsets[doc_id + 1] as usize - self.delimiter.len_utf8()
         };
         Some(&self.index.text()[begin..end])
     }
@@ -258,7 +269,7 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
 #[derive(Clone)]
 pub struct MultiDocIndexBuilder<'a, 'b> {
     index: Cow<'b, Index<'a, 'b>>,
-    delimiter: String,
+    delimiter: char,
 }
 
 impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
@@ -268,12 +279,12 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
     {
         Self {
             index: index.into(),
-            delimiter: "\n".to_string(),
+            delimiter: '\n',
         }
     }
 
-    pub fn delimiter(&mut self, delimiter: &str) -> &mut Self {
-        self.delimiter = delimiter.to_string();
+    pub fn delimiter(&mut self, delimiter: char) -> &mut Self {
+        self.delimiter = delimiter;
         self
     }
 
@@ -281,7 +292,7 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
         Ok(MultiDocIndex {
             index: self.index.clone(),
             offsets: Cow::Owned(self.calc_offsets()?),
-            delim_len: self.delimiter.len() as u32,
+            delimiter: self.delimiter,
         })
     }
 
@@ -302,37 +313,34 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
         W: Write,
         O: ByteOrder,
     {
+        let offsets = self.calc_offsets()?;
+        let delim_str = self.delimiter.to_string();
+
         // See MultiDocIndex::from_bytes for format
 
         // body
-        let offsets = self.calc_offsets()?;
         for x in self.index.suffix_array().iter().chain(offsets.iter()) {
             writer.write_u32::<O>(*x)?;
         }
+        writer.write_all(delim_str.as_bytes())?;
 
         // footer
         writer.write_u32::<O>(self.index.suffix_array().len() as u32)?;
         writer.write_u32::<O>(offsets.len() as u32)?;
-        writer.write_u32::<O>(self.delimiter.len() as u32)?;
+        writer.write_u32::<O>(delim_str.len() as u32)?;
 
         Ok(())
     }
 
     fn calc_offsets(&self) -> Result<Vec<u32>> {
-        if self.delimiter.is_empty() {
-            return Err(crate::Error::InvalidOption(
-                "delimiter cannot be empty string".to_string(),
-            ));
-        }
-
+        let delim_str = self.delimiter.to_string();
         let offsets = std::iter::once(0)
             .chain(
                 self.index
-                    .positions(&self.delimiter)
+                    .positions(&delim_str)
                     .iter()
                     .sorted()
-                    .dedup_by(|&a, &b| b - a < self.delimiter.len() as u32)
-                    .map(|x| x + self.delimiter.len() as u32),
+                    .map(|x| x + delim_str.len() as u32),
             )
             .collect();
         Ok(offsets)
@@ -430,12 +438,8 @@ mod tests {
     }
 
     #[quickcheck]
-    fn deserialize_multi_doc_index(texts: Vec<String>, delim: String) -> TestResult {
-        if delim.is_empty() {
-            return TestResult::discard();
-        }
-
-        let text = texts.iter().join(&delim);
+    fn deserialize_multi_doc_index(texts: Vec<String>, delim: char) {
+        let text = texts.iter().join(&delim.to_string());
         let index = IndexBuilder::new(&text).build().unwrap();
 
         let a = MultiDocIndexBuilder::new(&index).build().unwrap();
@@ -447,21 +451,17 @@ mod tests {
         let b = MultiDocIndex::from_bytes(&text, &buf).unwrap();
 
         assert_eq!(a, b);
-
-        TestResult::passed()
     }
 
     #[quickcheck]
-    fn multi_doc_basic(texts: Vec<String>, delim: String) -> TestResult {
-        if delim.is_empty() {
-            return TestResult::discard();
-        }
-        let text = texts.iter().join(&delim);
-        let texts: Vec<&str> = text.split(&delim).collect();
+    fn multi_doc_basic(texts: Vec<String>, delim: char) {
+        let delim_str = delim.to_string();
+        let text = texts.iter().join(&delim_str);
+        let texts: Vec<&str> = text.split(delim).collect();
 
         let index = IndexBuilder::new(&text).build().unwrap();
         let multi_doc_index = MultiDocIndexBuilder::new(index)
-            .delimiter(&delim)
+            .delimiter(delim)
             .build()
             .unwrap();
 
@@ -473,24 +473,19 @@ mod tests {
             .enumerate()
             .all(|(i, t)| &multi_doc_index.doc(i as u32).unwrap() == t));
         assert!(multi_doc_index.doc(texts.len() as u32).is_none());
-
-        TestResult::passed()
     }
 
     #[quickcheck]
-    fn multi_doc_extra(texts: Vec<String>, delim: String) -> TestResult {
-        if delim.is_empty() {
-            return TestResult::discard();
-        }
-        let text = texts.iter().join(&delim);
+    fn multi_doc_extra(texts: Vec<String>, delim: char) -> TestResult {
+        let text = texts.iter().join(&delim.to_string());
         if text.len() > 100 {
             return TestResult::discard();
         }
-        let texts: Vec<&str> = text.split(&delim).collect();
+        let texts: Vec<&str> = text.split(delim).collect();
 
         let index = IndexBuilder::new(&text).build().unwrap();
         let multi_doc_index = MultiDocIndexBuilder::new(index)
-            .delimiter(&delim)
+            .delimiter(delim)
             .build()
             .unwrap();
 
@@ -504,6 +499,11 @@ mod tests {
                         continue;
                     }
                     let query = &t[begin..end];
+
+                    let query_a = format!("{}{}", query, delim);
+                    let query_b = format!("{}{}", delim, query);
+                    assert_eq!(0, multi_doc_index.doc_positions(&query_a).count());
+                    assert_eq!(0, multi_doc_index.doc_positions(&query_b).count());
 
                     let actual = multi_doc_index.doc_positions(&query).sorted();
                     let expected = texts

@@ -30,7 +30,7 @@ fn index(matches: &ArgMatches) -> Result<()> {
     let block_size = value_t!(matches, "block", u32)
         .map(|x| x * 1024 * 1024)
         .unwrap_or(u32::MAX);
-    let delimiter = value_t!(matches, "delimiter", String).unwrap_or_else(|_| "\n".to_string());
+    let delimiter = value_t!(matches, "delimiter", char).unwrap_or('\n');
 
     let text_mmap = open_and_map(&text_filename)?;
     let text = unsafe { std::str::from_utf8_unchecked(&text_mmap) };
@@ -51,7 +51,7 @@ fn index(matches: &ArgMatches) -> Result<()> {
     let mut m_index_writer = BufWriter::new(m_index_file);
 
     MultiDocIndexBuilder::new(index)
-        .delimiter(&delimiter)
+        .delimiter(delimiter)
         .build_to_writer_native_endian(&mut m_index_writer)?;
 
     m_index_writer.flush()?;
@@ -112,7 +112,7 @@ fn main() -> Result<()> {
             (@arg FILE: * "File containing the text")
             (@arg QUERY: * -q --query +takes_value "Query string")
             (@arg index: -i --index +takes_value "Suffine index filepath")
-            (@arg delimiter: -d --delimiter +takes_value "String used to separate items. Defaults to newline character")
+            (@arg delimiter: -d --delimiter +takes_value "Character used to separate items. Defaults to newline character")
             (@arg nhits: -n +takes_value "Outputs first <nhits> hits")
             (@arg nocolor: --("no-color") "Prints all output without color")
             (@arg count: -c --count conflicts_with("nhits") "Counts hits without listing")

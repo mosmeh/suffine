@@ -53,7 +53,7 @@ sugar is sweet,
 And so are you.";
 let index = IndexBuilder::new(text).build().unwrap();
 let multi_doc_index = MultiDocIndexBuilder::new(index)
-    .delimiter("\n")
+    .delimiter('\n')
     .build()
     .unwrap();
 let result = multi_doc_index
