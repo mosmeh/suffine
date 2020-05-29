@@ -1,7 +1,6 @@
 use crate::build::{build_suffix_array, IntBuffer, VecWrapper};
 use crate::Result;
 use byteorder::{BigEndian, ByteOrder, LittleEndian, NativeEndian, ReadBytesExt, WriteBytesExt};
-use itertools::Itertools;
 use std::borrow::Cow;
 use std::io::{Cursor, Write};
 use std::mem;
@@ -117,18 +116,21 @@ impl<'a> IndexBuilder<'a> {
     }
 
     pub fn build_to_writer_little_endian<W: Write>(&self, writer: W) -> Result<()> {
-        self.build_to_buffer::<W, LittleEndian>(writer)
+        self.build_to_buffer::<W, LittleEndian>(writer)?;
+        Ok(())
     }
 
     pub fn build_to_writer_big_endian<W: Write>(&self, writer: W) -> Result<()> {
-        self.build_to_buffer::<W, BigEndian>(writer)
+        self.build_to_buffer::<W, BigEndian>(writer)?;
+        Ok(())
     }
 
     pub fn build_to_writer_native_endian<W: Write>(&self, writer: W) -> Result<()> {
-        self.build_to_buffer::<W, NativeEndian>(writer)
+        self.build_to_buffer::<W, NativeEndian>(writer)?;
+        Ok(())
     }
 
-    fn build_to_buffer<B, O>(&self, buffer: B) -> Result<()>
+    fn build_to_buffer<B, O>(&self, buffer: B) -> Result<usize>
     where
         B: IntBuffer<u32, O>,
         O: ByteOrder,
@@ -194,7 +196,7 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
                 1
                 // offsets.len()
                 + 1
-                // delim_len
+                // delimiter.len_utf8()
                 + 1
             );
 
@@ -279,20 +281,41 @@ impl<'a, 'b> MultiDocIndex<'a, 'b> {
 }
 
 #[derive(Clone)]
+enum IndexSource<'a, 'b> {
+    Text(&'a str),
+    Index(Cow<'b, Index<'a, 'b>>),
+}
+
+#[derive(Clone)]
 pub struct MultiDocIndexBuilder<'a, 'b> {
-    index: Cow<'b, Index<'a, 'b>>,
+    source: IndexSource<'a, 'b>,
     delimiter: char,
+    block_size: u32,
 }
 
 impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
-    pub fn new<I>(index: I) -> Self
+    pub fn new(text: &'a str) -> Self {
+        Self {
+            source: IndexSource::Text(text),
+            delimiter: '\n',
+            block_size: u32::MAX,
+        }
+    }
+
+    pub fn from_index<I>(index: I) -> Self
     where
         I: Into<Cow<'b, Index<'a, 'b>>>,
     {
         Self {
-            index: index.into(),
+            source: IndexSource::Index(index.into()),
             delimiter: '\n',
+            block_size: u32::MAX,
         }
+    }
+
+    pub fn block_size(&mut self, block_size: u32) -> &mut Self {
+        self.block_size = block_size;
+        self
     }
 
     pub fn delimiter(&mut self, delimiter: char) -> &mut Self {
@@ -301,9 +324,25 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
     }
 
     pub fn build(&self) -> Result<MultiDocIndex<'a, 'b>> {
+        let (index, text) = match &self.source {
+            IndexSource::Text(text) => {
+                let index = IndexBuilder::new(text)
+                    .block_size(self.block_size)
+                    .build()?;
+                (Cow::Owned(index), *text)
+            }
+            IndexSource::Index(index) => (index.clone(), index.text()),
+        };
+
+        let delim_len = self.delimiter.len_utf8();
+        let offsets = std::iter::once(0).chain(
+            text.match_indices(self.delimiter)
+                .map(|(i, _)| (i + delim_len) as u32),
+        );
+
         Ok(MultiDocIndex {
-            index: self.index.clone(),
-            offsets: Cow::Owned(self.calc_offsets()?),
+            index,
+            offsets: Cow::Owned(offsets.collect::<Vec<_>>()),
             delimiter: self.delimiter,
         })
     }
@@ -325,37 +364,41 @@ impl<'a, 'b> MultiDocIndexBuilder<'a, 'b> {
         W: Write,
         O: ByteOrder,
     {
-        let offsets = self.calc_offsets()?;
-        let delim_str = self.delimiter.to_string();
-
         // See MultiDocIndex::from_bytes for format
 
         // body
-        for x in self.index.suffix_array().iter().chain(offsets.iter()) {
-            writer.write_u32::<O>(*x)?;
+
+        let delim_str = self.delimiter.to_string();
+
+        let (sa_len, text) = match &self.source {
+            IndexSource::Text(text) => {
+                let sa_len = build_suffix_array::<_, O>(text, self.block_size, &mut writer)?;
+                (sa_len, *text)
+            }
+            IndexSource::Index(index) => {
+                for x in index.suffix_array().iter() {
+                    writer.write_u32::<O>(*x)?;
+                }
+                (index.suffix_array().len(), index.text())
+            }
+        };
+
+        writer.write_u32::<O>(0)?;
+        let mut offsets_len = 1;
+        for (i, _) in text.match_indices(self.delimiter) {
+            writer.write_u32::<O>((i + delim_str.len()) as u32)?;
+            offsets_len += 1;
         }
+
         writer.write_all(delim_str.as_bytes())?;
 
         // footer
-        writer.write_u32::<O>(self.index.suffix_array().len() as u32)?;
-        writer.write_u32::<O>(offsets.len() as u32)?;
+
+        writer.write_u32::<O>(sa_len as u32)?;
+        writer.write_u32::<O>(offsets_len as u32)?;
         writer.write_u32::<O>(delim_str.len() as u32)?;
 
         Ok(())
-    }
-
-    fn calc_offsets(&self) -> Result<Vec<u32>> {
-        let delim_str = self.delimiter.to_string();
-        let offsets = std::iter::once(0)
-            .chain(
-                self.index
-                    .positions(&delim_str)
-                    .iter()
-                    .sorted()
-                    .map(|x| x + delim_str.len() as u32),
-            )
-            .collect();
-        Ok(offsets)
     }
 }
 
@@ -445,32 +488,51 @@ mod tests {
     }
 
     #[quickcheck]
-    fn deserialize_index(text: String) {
-        let a = IndexBuilder::new(&text).build().unwrap();
+    fn build_index(text: String) {
+        let in_memory = IndexBuilder::new(&text).build().unwrap();
 
         let mut buf = Vec::new();
         IndexBuilder::new(&text)
             .build_to_writer_native_endian(&mut buf)
             .unwrap();
-        let b = Index::from_bytes(&text, &buf).unwrap();
+        let to_writer = Index::from_bytes(&text, &buf).unwrap();
 
-        assert_eq!(a, b);
+        assert_eq!(in_memory, to_writer);
     }
 
     #[quickcheck]
-    fn deserialize_multi_doc_index(texts: Vec<String>, delim: char) {
+    fn build_multi_doc_index(texts: Vec<String>, delim: char) {
         let text = texts.iter().join(&delim.to_string());
         let index = IndexBuilder::new(&text).build().unwrap();
 
-        let a = MultiDocIndexBuilder::new(&index).build().unwrap();
-
-        let mut buf = Vec::new();
-        MultiDocIndexBuilder::new(&index)
-            .build_to_writer_native_endian(&mut buf)
+        let new_in_memory = MultiDocIndexBuilder::new(&text)
+            .delimiter(delim)
+            .build()
             .unwrap();
-        let b = MultiDocIndex::from_bytes(&text, &buf).unwrap();
+        let from_index_in_memory = MultiDocIndexBuilder::from_index(&index)
+            .delimiter(delim)
+            .build()
+            .unwrap();
 
-        assert_eq!(a, b);
+        assert_eq!(new_in_memory, from_index_in_memory);
+
+        let mut buf_new = Vec::new();
+        MultiDocIndexBuilder::new(&text)
+            .delimiter(delim)
+            .build_to_writer_native_endian(&mut buf_new)
+            .unwrap();
+        let new_to_writer = MultiDocIndex::from_bytes(&text, &buf_new).unwrap();
+
+        let mut buf_from_index = Vec::new();
+        MultiDocIndexBuilder::from_index(&index)
+            .delimiter(delim)
+            .build_to_writer_native_endian(&mut buf_from_index)
+            .unwrap();
+        let from_index_to_writer = MultiDocIndex::from_bytes(&text, &buf_from_index).unwrap();
+
+        assert_eq!(new_to_writer, from_index_to_writer);
+
+        assert_eq!(new_in_memory, new_to_writer);
     }
 
     #[quickcheck]
@@ -479,8 +541,7 @@ mod tests {
         let text = texts.iter().join(&delim_str);
         let texts: Vec<&str> = text.split(delim).collect();
 
-        let index = IndexBuilder::new(&text).build().unwrap();
-        let multi_doc_index = MultiDocIndexBuilder::new(index)
+        let multi_doc_index = MultiDocIndexBuilder::new(&text)
             .delimiter(delim)
             .build()
             .unwrap();
@@ -506,8 +567,7 @@ mod tests {
         }
         let texts: Vec<&str> = text.split(delim).collect();
 
-        let index = IndexBuilder::new(&text).build().unwrap();
-        let multi_doc_index = MultiDocIndexBuilder::new(index)
+        let multi_doc_index = MultiDocIndexBuilder::new(&text)
             .delimiter(delim)
             .build()
             .unwrap();

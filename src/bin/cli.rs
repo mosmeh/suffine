@@ -5,8 +5,7 @@ use memmap::Mmap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use suffine::{Index, IndexBuilder, MultiDocIndex, MultiDocIndexBuilder};
-use tempfile::NamedTempFile;
+use suffine::{MultiDocIndex, MultiDocIndexBuilder};
 
 fn get_filenames(matches: &ArgMatches) -> Result<(PathBuf, PathBuf)> {
     let text_filename = value_t!(matches, "FILE", PathBuf)?;
@@ -34,23 +33,12 @@ fn index(matches: &ArgMatches) -> Result<()> {
 
     let text_mmap = open_and_map(&text_filename)?;
     let text = unsafe { std::str::from_utf8_unchecked(&text_mmap) };
-    let index_file = NamedTempFile::new()?;
-    {
-        let mut index_writer = BufWriter::new(&index_file);
-        IndexBuilder::new(&text)
-            .block_size(block_size)
-            .build_to_writer_native_endian(&mut index_writer)?;
-        index_writer.flush()?;
-    }
-
-    let index_file = index_file.reopen()?;
-    let index_bytes = unsafe { Mmap::map(&index_file)? };
-    let index = Index::from_bytes(&text, &index_bytes)?;
 
     let m_index_file = File::create(index_filename)?;
     let mut m_index_writer = BufWriter::new(m_index_file);
 
-    MultiDocIndexBuilder::new(index)
+    MultiDocIndexBuilder::new(text)
+        .block_size(block_size)
         .delimiter(delimiter)
         .build_to_writer_native_endian(&mut m_index_writer)?;
 

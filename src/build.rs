@@ -31,31 +31,29 @@ where
     }
 }
 
-pub fn build_suffix_array<B, O>(text: &str, block_size: u32, mut buffer: B) -> Result<()>
+pub fn build_suffix_array<B, O>(text: &str, block_size: u32, mut buffer: B) -> Result<usize>
 where
     B: IntBuffer<u32, O>,
     O: ByteOrder,
 {
     match text.len() {
-        0 => return Ok(()),
+        0 => return Ok(0),
         1 => {
             buffer.write(0)?;
-            return Ok(());
+            return Ok(1);
         }
         _ => (),
     }
 
     if text.len() <= block_size as usize {
-        build_suffix_array_in_memory(text, text.len(), buffer)?;
+        build_suffix_array_in_memory(text, text.len(), buffer)
     } else {
         let heap = sort_blocks(text, block_size)?;
-        merge_blocks(heap, buffer)?;
+        merge_blocks(heap, buffer)
     }
-
-    Ok(())
 }
 
-fn build_suffix_array_in_memory<B, O>(text: &str, len: usize, mut buffer: B) -> Result<()>
+fn build_suffix_array_in_memory<B, O>(text: &str, len: usize, mut buffer: B) -> Result<usize>
 where
     B: IntBuffer<u32, O>,
     O: ByteOrder,
@@ -65,11 +63,13 @@ where
         .table()
         .iter()
         .filter(|&&x| (x as usize) < len && text.is_char_boundary(x as usize));
+    let mut num_written = 0;
     for x in sa {
         buffer.write(*x)?;
+        num_written += 1;
     }
 
-    Ok(())
+    Ok(num_written)
 }
 
 struct Block<'a> {
@@ -185,21 +185,23 @@ fn sort_blocks(text: &str, block_size: u32) -> Result<BinaryHeap<Reverse<Block>>
     Ok(heap)
 }
 
-fn merge_blocks<B, O>(mut heap: BinaryHeap<Reverse<Block>>, mut buffer: B) -> Result<()>
+fn merge_blocks<B, O>(mut heap: BinaryHeap<Reverse<Block>>, mut buffer: B) -> Result<usize>
 where
     B: IntBuffer<u32, O>,
     O: ByteOrder,
 {
+    let mut num_written = 0;
     while let Some(Reverse(block)) = heap.pop() {
         let idx = block.front_index + block.begin as u32;
         buffer.write(idx)?;
+        num_written += 1;
 
         if let Some(next) = block.next() {
             heap.push(Reverse(next));
         }
     }
 
-    Ok(())
+    Ok(num_written)
 }
 
 #[cfg(test)]
