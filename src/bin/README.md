@@ -2,6 +2,14 @@
 
 Command-line interface for suffine
 
+## Installation
+
+Clone this repository and run:
+
+```sh
+cargo install --path .
+```
+
 ## Usage
 
 ### Index

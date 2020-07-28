@@ -2,9 +2,9 @@
 
 [![build](https://github.com/mosmeh/suffine/workflows/build/badge.svg)](https://github.com/mosmeh/suffine/actions)
 
-Suffix array construction for huge strings that require space larger than available memory
+Suffix array construction library for huge strings that require space larger than available memory
 
-WIP. Take a look at the examples!
+suffine also has [a command-line interface](src/bin/README.md).
 
 ## Examples
 
